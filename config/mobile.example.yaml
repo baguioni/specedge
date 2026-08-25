@@ -1,0 +1,29 @@
+#   ./script/batch_server.sh -f config/mobile.example.yaml
+#   ./build/linear_client \
+#     --model models/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q4_0.gguf \
+#     --host 127.0.0.1:8000 \
+#     --max-len 2048 \
+#     --chain-len 16
+base:
+  result_path: "result/mobile"
+  exp_name: "mobile"
+  dtype: fp32
+  seed: 42
+  max_len: 2048
+server:
+  process_name: server
+  target_model: Qwen/Qwen3-4B
+  device: cuda:0
+  temperature: 0.0
+  max_batch_size: 1
+  batch_type: static
+  num_clients: 1
+  cache_prefill: false
+client:
+  host: 127.0.0.1:8000
+  draft_model: Qwen/Qwen3-0.6B
+  dataset: specbench
+  sample_req_cnt: 8
+  req_offset: 0
+  max_n_beams: 17
+  max_budget: 16

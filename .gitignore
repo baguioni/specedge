@@ -17,3 +17,4 @@ config/*
 !config/auto_batch.example.yaml
 !config/server_only.example.yaml
 !config/specedge.example.yaml
+!config/mobile.example.yaml

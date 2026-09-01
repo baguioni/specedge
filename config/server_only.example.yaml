@@ -7,14 +7,14 @@ base:
   max_len: 2048
 server:
   process_name: server
-  target_model: Qwen/Qwen3-14B
+  target_model: Qwen/Qwen3-4B
   device: cuda:0
-  temperature: 0.7
+  temperature: 0.0
   num_clients: 1
 client:
   host: 127.0.0.1:8000
   process_name: client
-  draft_model: Qwen/Qwen3-1.7B
+  draft_model: Qwen/Qwen3-0.6B
   dataset: specbench
   max_n_beams: 32
   max_beam_len: 4

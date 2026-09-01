@@ -5,7 +5,14 @@ import random
 from pathlib import Path
 
 import yaml
-from rich.progress import Progress
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 
 import log
 import util
@@ -116,7 +123,13 @@ async def main():
 
     iter_idx = 0
 
-    with Progress() as progress:
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+    ) as progress:
         task = progress.add_task("Benchmark", total=len(dataset_indices))
         while True:
             logger.debug("iter_idx=%s", iter_idx)

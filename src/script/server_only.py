@@ -175,6 +175,20 @@ async def main():
                     prefill_requests=prefill_requests,
                 )
 
+                # Snapshot before edge_post_verify(): it removes (sets to
+                # None) any request that finishes this round as a side
+                # effect of computing n_fresh_tokens, via
+                # SpecExecEdgeVerify._remove_request(). Logging against
+                # req_manager.req_statuses after the call would silently
+                # skip exactly the round that finished each request -- its
+                # last batch of accepted tokens never reaches
+                # result_logger.log(), only trace.jsonl/trace.txt (written
+                # from inside _remove_request(), before removal). The
+                # mobile-specedge port doesn't have this gap: it logs every
+                # RunCycle() unconditionally, and the last one runs before
+                # its Generate() loop can exit.
+                req_statuses = list(req_manager.req_statuses)
+
                 n_fresh_tokens = await edge_verify.edge_post_verify(
                     selection=selection,
                     batch_indices=batch_indices,
@@ -183,7 +197,7 @@ async def main():
                 )
 
             n_fresh_tokens = n_fresh_tokens.cpu().numpy()
-            for batch_idx, req_status in enumerate(req_manager.req_statuses):
+            for batch_idx, req_status in enumerate(req_statuses):
                 if not req_status:
                     continue
 

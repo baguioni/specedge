@@ -16,6 +16,7 @@ from rich.progress import (
 
 import log
 import util
+from gen_trace import TraceWriter
 from config import SpecEdgeBatchClientConfig as client_config
 from config import SpecEdgeBatchServerConfig as server_config
 from specedge.engine.graph import BatchGraphEngine
@@ -62,6 +63,14 @@ async def main():
 
     logger.info("Initializing tokenizer...")
     _tokenizer = util.load_tokenizer(client_config.draft_model)
+
+    logger.info("Initializing generation trace...")
+    trace = TraceWriter(
+        log_dir=Path(os.environ["SPECEDGE_RESULT_PATH"])
+        / os.environ["SPECEDGE_EXP_NAME"],
+        dataset=dataset,
+        tokenizer=_tokenizer,
+    )
 
     logger.info("Initializing request manager...")
     req_manager = RequestManager(
@@ -116,6 +125,7 @@ async def main():
         draft_engine=draft_engine,
         target_engine=target_engine,
         req_manager=req_manager,
+        trace=trace,
     )
 
     logger.info("Initializing SpecEdge Server-Verify...")
@@ -195,6 +205,8 @@ async def main():
                 )
 
             iter_idx += 1
+
+    trace.close()
 
 
 def _load_config(config_file: Path):

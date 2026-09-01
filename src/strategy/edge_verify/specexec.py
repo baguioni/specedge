@@ -6,6 +6,7 @@ import log
 from config import SpecEdgeBatchClientConfig as config
 from specedge.engine.graph import BatchGraphEngine
 from specedge.tree import BatchTree
+from gen_trace import TraceWriter
 from strategy.request_manager import RequestManager
 
 
@@ -17,12 +18,14 @@ class SpecExecEdgeVerify:
         req_manager: RequestManager,
         draft_engine: Optional[BatchGraphEngine] = None,
         target_engine: Optional[BatchGraphEngine] = None,
+        trace: Optional[TraceWriter] = None,
     ):
         self._logger = log.get_logger()
         self._result_logger = log.get_result_logger()
 
         self._req_manager = req_manager
         self._eos_token = eos_token
+        self._trace = trace
 
         # Load configuration
         self._device = config.device
@@ -282,6 +285,8 @@ class SpecExecEdgeVerify:
             remove_indices = torch.where(remove_flag)[0]
             self._logger.debug("Removing requests %s", remove_indices.tolist())
 
+            self._trace_removed(remove_indices, eos_flag)
+
             self._tree.remove_requests(remove_indices)
             self._req_manager.remove_requests(remove_indices)
 
@@ -290,3 +295,39 @@ class SpecExecEdgeVerify:
 
             if self._target_engine:
                 self._target_engine.remove_requests(remove_indices)
+
+    def _trace_removed(self, remove_indices: torch.Tensor, eos_flag: torch.Tensor):
+        """
+        Record each finished request before its tree slot is recycled.
+
+        Called from _remove_request while the slot is still intact:
+        _reorder_by_sequence has already compacted the accepted path into
+        [0, prefix_len), so that slice is the linear sequence -- prompt plus
+        every accepted token plus each round's bonus token -- and nothing
+        else reads it once add_request() zeroes the slot for the next
+        request.
+
+        Nothing here is trimmed at the EOS token. The port's Generate()
+        trims what it returns, but the untrimmed sequence plus stop_reason
+        is what makes a length difference between the two runs readable:
+        trimming first would hide whether the two stopped at the same place
+        or merely reported the same way.
+        """
+        if self._trace is None:
+            return
+
+        for batch_idx in remove_indices.tolist():
+            req_status = self._req_manager.req_statuses[batch_idx]
+            if req_status is None:
+                continue
+
+            prompt_len = int(self._req_manager.initial_prefix_len[batch_idx].item())
+            seq_len = int(self._tree.prefix_len[batch_idx].item())
+            token_ids = self._tree.tokens[batch_idx, :seq_len].tolist()
+
+            self._trace.add(
+                req_idx=req_status.req_idx,
+                prompt_token_ids=token_ids[:prompt_len],
+                output_token_ids=token_ids[prompt_len:],
+                stop_reason="eos" if bool(eos_flag[batch_idx]) else "max_new_tokens",
+            )

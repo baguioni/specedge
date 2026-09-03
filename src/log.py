@@ -164,6 +164,7 @@ class ResultHandler(logging.Handler):
         try:
             json.dump(log_entry, self.file)
             self.file.write("\n")
+            self.file.flush()
         except Exception:
             self.handleError(record)
 

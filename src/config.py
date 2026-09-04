@@ -118,6 +118,22 @@ class SpecEdgeClientConfig(metaclass=_ConfigMeta):
         )
         cls.proactive_max_budget = int(cls._from_env("SPECEDGE_PROACTIVE_MAX_BUDGET"))
 
+        # overlap strategy configuration (proactive draft vs. saguaro cache).
+        # Fall back to values derived from proactive_type so pre-existing env
+        # setups keep working unchanged.
+        cls.overlap_strategy = os.getenv("SPECEDGE_OVERLAP_STRATEGY") or (
+            "disabled" if cls.proactive_type == "disabled" else "proactive"
+        )
+        cls.saguaro_budget = int(os.getenv("SPECEDGE_SAGUARO_BUDGET", "12"))
+        cls.saguaro_branch_len = int(
+            os.getenv("SPECEDGE_SAGUARO_BRANCH_LEN", str(cls.proactive_max_beam_len))
+        )
+        cls.saguaro_fan_out = os.getenv("SPECEDGE_SAGUARO_FAN_OUT", "geometric")
+        cls.saguaro_init_accept_rate = float(
+            os.getenv("SPECEDGE_SAGUARO_INIT_ACCEPT_RATE", "0.5")
+        )
+        cls.saguaro_linear = os.getenv("SPECEDGE_SAGUARO_LINEAR", "auto")
+
         # token generation configuration
         cls.max_new_tokens = int(cls._from_env("SPECEDGE_MAX_NEW_TOKENS"))
         cls.max_request_num = int(cls._from_env("SPECEDGE_MAX_REQUEST_NUM"))

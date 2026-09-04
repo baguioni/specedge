@@ -4,6 +4,13 @@ import torch
 import log
 import util
 from config import SpecEdgeClientConfig as config
+from specedge.client.overlap import OverlapResult, OverlapStrategy
+from specedge.client.reorder import (
+    append_bonus_token,
+    label_forest_roots,
+    reorder_to_verified_path,
+    splice_scratch_branch,
+)
 from specedge.engine.graph import GraphEngine
 from specedge.tree import Tree
 
@@ -85,6 +92,66 @@ class SpecExecProactiveDraft:
         self._tree.end = prev_tree_end
 
         return best_token_idx, best_token_id, prefix_len, tree_end
+
+    @torch.inference_mode()
+    def draft_forest(self, exit_nodes, bonus_tokens, branch_len):
+        """Plant one POST_CANDIDATE root per (exit_node, bonus_token) pair and
+        grow ``branch_len`` levels, all inside scratch space past ``tree.end``.
+
+        Shares the proactive beam/budget machinery, so the whole forest costs
+        ``branch_len`` (wider) forward passes -- not ``branch_len`` per root.
+
+        Returns ``(forest_start, forest_end, root_indices, root_of)`` or ``None``
+        when there is nothing to grow.
+        """
+        if len(exit_nodes) == 0:
+            return None
+
+        prev_tree_end = self._tree.end
+        prev_tree_prefix_len = self._tree.prefix_len
+
+        self._tree.prefix_len = self._tree.end
+        forest_start = int(self._tree.end)
+
+        root_indices: list[int] = []
+        for exit_idx, bonus in zip(exit_nodes, bonus_tokens, strict=True):
+            self._tree.add(
+                token_ids=torch.tensor([bonus], device=self._device),
+                token_positions=self._tree.positions[exit_idx].reshape(1) + 1,
+                parent_indices=torch.tensor([exit_idx], device=self._device),
+                logprobs=torch.tensor([0.0], device=self._device),
+                token_status=self._tree.POST_CANDIDATE,
+            )
+            root_indices.append(int(self._tree.end) - 1)
+
+        for _ in range(branch_len):
+            logits, parent_indices, parent_scores, parent_positions = (
+                self._process_candidates()
+            )
+            token_ids, token_positions, parent_indices, beam_scores = (
+                self._get_next_beams(
+                    logits, parent_indices, parent_positions, parent_scores
+                )
+            )
+
+            if token_ids.size(-1) == 0:
+                break
+
+            self._tree.add(
+                token_ids=token_ids,
+                token_positions=token_positions,
+                parent_indices=parent_indices,
+                logprobs=beam_scores,
+                token_status=self._tree.POST_CANDIDATE,
+            )
+
+        forest_end = int(self._tree.end)
+        root_of = label_forest_roots(self._tree, forest_start, forest_end, root_indices)
+
+        self._tree.prefix_len = prev_tree_prefix_len
+        self._tree.end = prev_tree_end
+
+        return forest_start, forest_end, root_indices, root_of
 
     def _get_best_bonus_token_candidate(self):
         """
@@ -277,3 +344,64 @@ class SpecExecProactiveDraft:
             best_beam_indices,
             flat_best_probs,
         )
+
+
+class ProactiveStrategy(OverlapStrategy):
+    """SpecEdge proactive draft generation as an :class:`OverlapStrategy`.
+
+    One deep bet from the single highest-cumulative-logprob leaf; spliced only
+    on "complete draft alignment" (the verified path ends at that leaf and the
+    server's bonus token matches the first proactively drafted token).
+    """
+
+    name = "proactive"
+
+    def __init__(self, tree, engine, device, dtype, cfg) -> None:
+        super().__init__(tree, engine, device, dtype)
+        self._pd = SpecExecProactiveDraft(tree=tree, engine=engine, max_len=cfg.max_len)
+        self._depth_gain = int(cfg.proactive_max_beam_len)
+        self._pending = (None, None, None, None)
+
+    @property
+    def depth_gain(self) -> int:
+        return self._depth_gain
+
+    def speculate(self) -> None:
+        self._pending = self._pd.draft()
+
+    def reconcile(
+        self,
+        *,
+        seq_mask: torch.Tensor,
+        last_accepted_token_idx: int,
+        extra_token_id: torch.Tensor,
+    ) -> OverlapResult:
+        root_leaf_idx, root_token_id, p_prefix, p_end = self._pending
+        bonus = int(extra_token_id.flatten()[0].item())
+
+        aligned = (
+            root_leaf_idx is not None
+            and int(root_leaf_idx) == int(last_accepted_token_idx)
+            and int(root_token_id) == bonus
+        )
+
+        if aligned:
+            branch_src = torch.arange(int(p_prefix), int(p_end), device=self._device)
+            splice_scratch_branch(
+                self._tree,
+                self._engine,
+                self._device,
+                self._dtype,
+                seq_mask,
+                branch_src,
+            )
+            return OverlapResult(
+                spliced=True,
+                cache_hit=True,
+                n_reused=int(p_end) - int(p_prefix),
+                n_hypotheses=1,
+            )
+
+        reorder_to_verified_path(self._tree, self._engine, self._device, seq_mask)
+        append_bonus_token(self._tree, extra_token_id, self._device)
+        return OverlapResult(spliced=False, cache_hit=False, n_reused=0, n_hypotheses=1)

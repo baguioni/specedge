@@ -56,17 +56,33 @@ def main(config_file: str):
     logger.debug("reasoning: %s", reasoning)
 
     # client praoctive draft configuration
-    proactive_type = config["client"]["proactive"]["type"]
-    proactive_max_n_beams = config["client"]["proactive"]["max_n_beams"]
-    proactive_max_beam_len = config["client"]["proactive"]["max_beam_len"]
-    proactive_max_branch_width = config["client"]["proactive"]["max_branch_width"]
-    proactive_max_budget = config["client"]["proactive"]["max_budget"]
+    proactive_cfg = config["client"]["proactive"]
+    proactive_type = proactive_cfg["type"]
+    proactive_max_n_beams = proactive_cfg["max_n_beams"]
+    proactive_max_beam_len = proactive_cfg["max_beam_len"]
+    proactive_max_branch_width = proactive_cfg["max_branch_width"]
+    proactive_max_budget = proactive_cfg["max_budget"]
 
     logger.debug("proactive_type: %s", proactive_type)
     logger.debug("proactive_max_n_beams: %s", proactive_max_n_beams)
     logger.debug("proactive_max_beam_len: %s", proactive_max_beam_len)
     logger.debug("proactive_max_branch_width: %s", proactive_max_branch_width)
     logger.debug("proactive_max_budget: %s", proactive_max_budget)
+
+    # overlap strategy configuration (proactive draft vs. saguaro cache)
+    overlap_strategy = proactive_cfg.get(
+        "strategy", "disabled" if proactive_type == "disabled" else "proactive"
+    )
+    saguaro_cfg = proactive_cfg.get("saguaro", {}) or {}
+    saguaro_budget = saguaro_cfg.get("budget", 12)
+    saguaro_branch_len = saguaro_cfg.get("branch_len", proactive_max_beam_len)
+    saguaro_fan_out = saguaro_cfg.get("fan_out", "geometric")
+    saguaro_init_accept_rate = saguaro_cfg.get("init_accept_rate", 0.5)
+    saguaro_linear = saguaro_cfg.get("linear", "auto")
+
+    logger.debug("overlap_strategy: %s", overlap_strategy)
+    logger.debug("saguaro_budget: %s", saguaro_budget)
+    logger.debug("saguaro_branch_len: %s", saguaro_branch_len)
 
     # experiment configuration
     max_new_tokens = config["client"]["max_new_tokens"]
@@ -104,6 +120,12 @@ def main(config_file: str):
                 "SPECEDGE_PROACTIVE_MAX_BEAM_LEN": proactive_max_beam_len,
                 "SPECEDGE_PROACTIVE_MAX_BRANCH_WIDTH": proactive_max_branch_width,
                 "SPECEDGE_PROACTIVE_MAX_BUDGET": proactive_max_budget,
+                "SPECEDGE_OVERLAP_STRATEGY": overlap_strategy,
+                "SPECEDGE_SAGUARO_BUDGET": saguaro_budget,
+                "SPECEDGE_SAGUARO_BRANCH_LEN": saguaro_branch_len,
+                "SPECEDGE_SAGUARO_FAN_OUT": saguaro_fan_out,
+                "SPECEDGE_SAGUARO_INIT_ACCEPT_RATE": saguaro_init_accept_rate,
+                "SPECEDGE_SAGUARO_LINEAR": saguaro_linear,
                 "SPECEDGE_MAX_NEW_TOKENS": max_new_tokens,
                 "SPECEDGE_MAX_REQUEST_NUM": max_request_num,
                 "SPECEDGE_REQ_OFFSET": req_offset,

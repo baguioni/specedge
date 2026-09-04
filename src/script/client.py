@@ -29,10 +29,16 @@ async def main():
     )
 
     logger.info("Initializing engine")
+    # Capture graphs wide enough for the overlap strategy's forwards too
+    # (proactive expansion / saguaro fan-out can exceed the main beam count).
     engine = GraphEngine(
         model=draft_model,
         max_len=config.max_len,
-        max_n_beams=config.max_n_beams,
+        max_n_beams=max(
+            config.max_n_beams,
+            config.proactive_max_n_beams,
+            config.saguaro_budget,
+        ),
     )
 
     logger.info("Initializing tokenizer %s", config.draft_model)

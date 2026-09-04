@@ -72,6 +72,35 @@ def load_data(data_folder_path: Path):
     return client_df, server_df
 
 
+def overlap_metrics(client_df: pl.DataFrame):
+    """Saguaro / proactive overlap stats. Returns None for pre-feature runs."""
+    cols = client_df.columns
+    if "target.cache_hit" not in cols:
+        return None
+
+    total = client_df.height
+    hits = client_df.filter(pl.col("target.cache_hit")).height
+
+    strategy = "disabled"
+    if "target.overlap_strategy" in cols and total:
+        strategy = client_df.select("target.overlap_strategy").to_series()[0]
+
+    mean_reused = 0.0
+    if "target.n_reused" in cols:
+        mean_reused = client_df.select("target.n_reused").mean().item() or 0.0
+
+    mean_hyp = 0.0
+    if "target.n_hypotheses" in cols:
+        mean_hyp = client_df.select("target.n_hypotheses").mean().item() or 0.0
+
+    return {
+        "strategy": strategy,
+        "cache_hit_rate": (hits / total) if total else 0.0,
+        "mean_reused_tokens": mean_reused,
+        "mean_hypotheses": mean_hyp,
+    }
+
+
 def overall_analysis(server_df: pl.DataFrame, client_df: pl.DataFrame, subset: str):
     server_start_time = datetime.fromisoformat(
         server_df.select(pl.first("timestamp")).item()
@@ -396,6 +425,21 @@ def print_table(client_df: pl.DataFrame, server_df: pl.DataFrame, subset: str):
         f"{metrics['tokens']['accepted'][0]:.2f}",
         f"{metrics['tokens']['accepted'][1]:.2f}",
     )
+
+    overlap = overlap_metrics(client_df)
+    if overlap is not None:
+        overall_table.add_section()
+        overall_table.add_row("Overlap Strategy", str(overlap["strategy"]))
+        overall_table.add_row(
+            "Cache Hit Rate", f"{overlap['cache_hit_rate'] * 100:.3f} %"
+        )
+        overall_table.add_row(
+            "Mean Reused Tokens", f"{overlap['mean_reused_tokens']:.3f}"
+        )
+        overall_table.add_row(
+            "Mean Hypotheses / cycle", f"{overlap['mean_hypotheses']:.3f}"
+        )
+
     overall_table.add_section()
     overall_table.add_row(
         "Inter token latency",
@@ -527,9 +571,11 @@ if __name__ == "__main__":
         default="overall",
     )
     parser.add_argument("--plain", action="store_true", help="Use plain text data")
-    parser.add_argument("--gpu", default="A100_80", type=str, choices=["A100_80", "A100_40"])
+    parser.add_argument(
+        "--gpu", default="A100_80", type=str, choices=["A100_80", "A100_40"]
+    )
     args = parser.parse_args()
-    
+
     if args.gpu == "A100_80":
         print("Using A100_80 GPU")
         GPU_COST = A100_80_GPU_COST

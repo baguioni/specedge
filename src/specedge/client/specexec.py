@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 
 import numpy as np
 import torch
@@ -7,7 +6,8 @@ import torch
 import log
 import util
 from config import SpecEdgeClientConfig as config
-from specedge.client.proactive import SpecExecProactiveDraft
+from specedge.client.overlap import OverlapResult, build_overlap_strategy
+from specedge.client.reorder import append_bonus_token, reorder_to_verified_path
 from specedge.network.grpc import GrpcClientController
 from specedge.tree import Tree
 
@@ -66,23 +66,26 @@ class SpecExecClient:
         )
         self._validator = GrpcClientController(host=config.host, device=self._device)
 
-        self._proactive_client: Optional[SpecExecProactiveDraft] = None
-        if self._proactive_type != "disabled":
-            self._proactive_client = SpecExecProactiveDraft(
-                tree=self._tree,
-                engine=self._engine,
-                max_len=self._max_len,
-            )
+        # Overlap strategy: extra edge drafting during server verification.
+        # "disabled" -> None; "proactive" / "saguaro" -> an OverlapStrategy.
+        self._overlap = build_overlap_strategy(
+            config.overlap_strategy,
+            tree=self._tree,
+            engine=self._engine,
+            device=self._device,
+            dtype=self._dtype,
+            cfg=config,
+        )
 
-            # Whether Proactive Draft was executed in the previous iter
-            self._previous_proactive_draft = False
-
-            # Whether Proactive Draft is executed in the current iter
-            self._proactive_draft = False
+        # Whether overlap work was spliced in the current / previous iter
+        self._overlap_active = False
+        self._previous_overlap_active = False
 
     def _verify_configs(self):
         if self._proactive_type not in ["included", "excluded", "disabled"]:
             raise ValueError(f"Invalid proactive_type: {self._proactive_type}")
+        if config.overlap_strategy not in ["disabled", "proactive", "saguaro"]:
+            raise ValueError(f"Invalid overlap_strategy: {config.overlap_strategy}")
 
     async def generate(self, req_idx: int):
         """
@@ -157,6 +160,10 @@ class SpecExecClient:
                     "prefill": target_stats["prefill"],
                     "proactive": target_stats["proactive"],
                     "prev_proactive": target_stats["previous_proactive"],
+                    "overlap_strategy": target_stats["overlap_strategy"],
+                    "cache_hit": target_stats["cache_hit"],
+                    "n_reused": target_stats["n_reused"],
+                    "n_hypotheses": target_stats["n_hypotheses"],
                 },
                 "num_accepted_tokens": target_stats["num_accepted_tokens"],
             }
@@ -171,8 +178,12 @@ class SpecExecClient:
         draft_forward_times = []
 
         max_beam_len = self._max_beam_len
-        if self._proactive_type == "included" and self._proactive_draft:
-            max_beam_len = max(0, self._max_beam_len - config.proactive_max_beam_len)
+        if (
+            self._proactive_type == "included"
+            and self._overlap_active
+            and self._overlap is not None
+        ):
+            max_beam_len = max(0, self._max_beam_len - self._overlap.depth_gain)
 
         if torch.where(self._tree.status == self._tree.CANDIDATE)[0].numel() == 0:
             max_beam_len = 0
@@ -417,13 +428,8 @@ class SpecExecClient:
             )
             await asyncio.sleep(0.00001)
 
-            if self._proactive_client is not None:
-                (
-                    root_leaf_idx,
-                    root_token_id,
-                    proactive_tree_prefix_len,
-                    proactive_tree_end,
-                ) = self._proactive_client.draft()
+            if self._overlap is not None:
+                self._overlap.speculate()
 
             selection, prefill_cnt = (
                 target_result.result() if target_result.done() else await target_result
@@ -476,38 +482,27 @@ class SpecExecClient:
                 "Num of accepted tokens: %d", fresh_token_indices.numel() + 1
             )
 
-            extra_token_id = torch.tensor(
-                [interim_t[last_accepted_token_idx]], device=self._device
-            )
+            last_idx = int(last_accepted_token_idx.flatten()[0].item())
+            extra_token_id = interim_t.reshape(-1)[last_idx].reshape(1).to(self._device)
 
-            if self._proactive_client is not None:
-                self._previous_proactive_draft = self._proactive_draft
+            self._previous_overlap_active = self._overlap_active
 
-            if (
-                self._proactive_client is not None
-                and root_leaf_idx is not None  # type: ignore
-                and root_leaf_idx == last_accepted_token_idx  # type: ignore
-                and extra_token_id == root_token_id  # type: ignore
-            ):
-                self._proactive_draft = True
-                self._reorder_by_sequence_proactive(
-                    best_seq_mask,
-                    proactive_tree_prefix_len,  # type: ignore
-                    proactive_tree_end,  # type: ignore
+            if self._overlap is not None:
+                overlap_result = self._overlap.reconcile(
+                    seq_mask=best_seq_mask,
+                    last_accepted_token_idx=last_idx,
+                    extra_token_id=extra_token_id,
                 )
+                self._overlap_active = overlap_result.spliced
             else:
-                self._proactive_draft = False
-                self._reorder_by_sequence(best_seq_mask)
-                self._tree.add(
-                    token_ids=extra_token_id,
-                    token_positions=self._tree.positions[self._tree.end - 1] + 1,
-                    parent_indices=torch.tensor(
-                        [self._tree.end - 1], device=self._device
-                    ),
-                    logprobs=torch.tensor([0.0], device=self._device),
+                reorder_to_verified_path(
+                    self._tree, self._engine, self._device, best_seq_mask
                 )
-                self._tree.prefix_len = self._tree.end
-                self._tree.status[: self._tree.prefix_len - 1] = self._tree.PROMPT
+                append_bonus_token(self._tree, extra_token_id, self._device)
+                overlap_result = OverlapResult(
+                    spliced=False, cache_hit=False, n_reused=0, n_hypotheses=0
+                )
+                self._overlap_active = False
 
             fresh_token_ids = torch.cat(
                 [fresh_token_ids, extra_token_id], dim=-1
@@ -519,131 +514,14 @@ class SpecExecClient:
             "postprocess_t": postprocess_t.elapsed,
             "num_accepted_tokens": fresh_token_ids.size(-1),
             "prefill": prefill_cnt,
-            "previous_proactive": self._previous_proactive_draft
-            if self._proactive_client
-            else False,
-            "proactive": self._proactive_draft if self._proactive_client else False,
+            "previous_proactive": self._previous_overlap_active,
+            "proactive": overlap_result.spliced,
+            "overlap_strategy": (
+                self._overlap.name if self._overlap is not None else "disabled"
+            ),
+            "cache_hit": overlap_result.cache_hit,
+            "n_reused": overlap_result.n_reused,
+            "n_hypotheses": overlap_result.n_hypotheses,
         }
 
         return fresh_token_ids, stats
-
-    def _reorder_by_sequence(self, seq_mask: torch.Tensor):
-        """
-        Reorder the tree and engine's kv cache according to the validated sequence.
-
-        Args:
-            seq_mask: Sequence Mask
-        """
-
-        seq_indices = torch.where(seq_mask != 0)[0]
-
-        self._engine.gather(
-            seq_indices,
-            torch.arange(seq_indices.size(-1), device=self._device),
-        )
-
-        self._tree.reorder_by_sequence(seq_mask, seq_indices)
-
-    def _reorder_by_sequence_proactive(
-        self,
-        seq_mask: torch.Tensor,
-        proactive_tree_prefix_len: int,
-        proactive_tree_end: int,
-    ):
-        """
-        Reorders the tree and engine's kv cache in a valid sequence
-        when the tree generated by Proactive Draft is valid.
-
-        Args:
-            seq_mask: Sequence Mask
-            proactive_tree_prefix_len: Start of the tree generated by Proactive Draft
-            proactive_tree_end: End of the tree generated by Proactive Draft
-        """
-        seq_indices = torch.where(seq_mask != 0)[0]
-        max_src_idx = proactive_tree_end
-        mapping_tensor = torch.full(
-            (max_src_idx,), -1, dtype=torch.long, device=self._device
-        )
-
-        # Original Draft Tree
-
-        new_prefix_len = int(torch.sum(seq_mask).item())
-        if torch.any(seq_mask[self._tree.prefix_len :]):
-            src_indices = seq_indices[seq_indices >= self._tree.prefix_len]
-            dest_indices = torch.arange(
-                self._tree.prefix_len, new_prefix_len, device=self._device
-            )
-            mapping_tensor[src_indices] = dest_indices
-
-            self._tree.tokens[dest_indices] = self._tree.tokens[src_indices]
-            self._tree.positions[dest_indices] = dest_indices
-            self._tree.parents[dest_indices] = dest_indices - 1
-            self._tree.status[dest_indices] = self._tree.GENERATED
-
-        # Proactive Tree
-
-        src_indices = torch.arange(
-            proactive_tree_prefix_len, proactive_tree_end, device=self._device
-        )
-        dest_indices = torch.arange(
-            new_prefix_len,
-            new_prefix_len + proactive_tree_end - proactive_tree_prefix_len,
-            device=self._device,
-        )
-        mapping_tensor[src_indices] = dest_indices
-
-        self._tree.tokens[dest_indices] = self._tree.tokens[src_indices]
-        self._tree.positions[dest_indices] = self._tree.positions[src_indices]
-        self._tree.parents[dest_indices] = mapping_tensor[
-            self._tree.parents[src_indices]
-        ]
-        self._tree.status[dest_indices] = self._tree.status[src_indices]
-        self._tree.logprobs[dest_indices] = self._tree.logprobs[src_indices]
-        self._tree.amask[
-            ...,
-            dest_indices,
-            new_prefix_len : new_prefix_len
-            + proactive_tree_end
-            - proactive_tree_prefix_len,
-        ] = self._tree.amask[
-            ..., src_indices, proactive_tree_prefix_len:proactive_tree_end
-        ]
-
-        self._tree.end = new_prefix_len + proactive_tree_end - proactive_tree_prefix_len
-        self._tree.prefix_len = new_prefix_len + 1
-
-        self._tree.status[: self._tree.prefix_len - 1] = self._tree.PROMPT
-        self._tree.status[self._tree.prefix_len - 1 : self._tree.prefix_len + 1] = (
-            self._tree.PROCESSED
-        )
-        self._tree.status[self._tree.status == self._tree.POST_CANDIDATE] = (
-            self._tree.CANDIDATE
-        )
-        self._tree.status[self._tree.status == self._tree.POST_PROCESSED] = (
-            self._tree.PROCESSED
-        )
-
-        self._tree.logprobs[self._tree.end :].zero_()
-        # FIXME: change to public property access
-        self._tree._data[:, self._tree.end :].zero_()
-
-        _causal_mask = torch.tril(
-            torch.ones(
-                self._tree.prefix_len,
-                self._tree.prefix_len,
-                dtype=self._dtype,
-                device=self._device,
-            )
-        )
-        self._tree.amask[..., : self._tree.prefix_len, : self._tree.prefix_len] = (
-            _causal_mask
-        )
-        self._tree.amask[
-            ..., self._tree.prefix_len : self._tree.end, : self._tree.prefix_len
-        ] = 1.0
-
-        src_indices = seq_mask[: self._tree.prefix_len]
-        src_indices = torch.where(src_indices)[0]
-        dst_indices = torch.arange(src_indices.size(-1), device=self._device)
-
-        self._engine.gather(src_indices, dst_indices)

@@ -36,11 +36,15 @@ class CachedSpeculation:
         root_scratch_idx: index of this branch's root (the bonus-token node).
         node_indices: sorted absolute indices of every node in the branch.
         n_tokens: ``node_indices.numel()`` -- tokens reused on a cache hit.
+        has_frontier: branch contains a POST_CANDIDATE node, i.e. after splicing
+            it leaves a CANDIDATE frontier for the next draft round. Hits on
+            frontier-less branches fall back to the plain reorder path.
     """
 
     root_scratch_idx: int
     node_indices: torch.Tensor
     n_tokens: int
+    has_frontier: bool = True
 
 
 @dataclass

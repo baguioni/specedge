@@ -30,9 +30,10 @@ _ACCEPT_EMA = 0.1
 
 
 def build_speculation_cache(
-    forest, exit_nodes, bonus_tokens, device
+    tree, forest, exit_nodes, bonus_tokens, device
 ) -> SpeculationCache:
     _, _, root_indices, root_of = forest
+    post_candidate = int(tree.POST_CANDIDATE)
 
     by_root: dict[int, list[int]] = {int(r): [] for r in root_indices}
     for idx, root in root_of.items():
@@ -44,12 +45,17 @@ def build_speculation_cache(
         exit_nodes, bonus_tokens, root_indices, strict=True
     ):
         nodes = sorted(by_root[int(root_idx)])
+        # A branch is only usable if, after splicing, it leaves a CANDIDATE
+        # frontier for the next _grow_tree to extend -- otherwise the tree
+        # degenerates and the client sends an undersized verification request.
+        has_frontier = any(int(tree.status[n].item()) == post_candidate for n in nodes)
         cache.put(
             Outcome(int(exit_idx), int(bonus)),
             CachedSpeculation(
                 root_scratch_idx=int(root_idx),
                 node_indices=torch.tensor(nodes, dtype=torch.long, device=device),
                 n_tokens=len(nodes),
+                has_frontier=has_frontier,
             ),
         )
     return cache
@@ -69,6 +75,12 @@ class SaguaroStrategy(OverlapStrategy):
         self._max_n_beams = int(cfg.proactive_max_n_beams)
         self._max_depth = max(1, int(cfg.max_beam_len))
         self._accept_rate = float(cfg.saguaro_init_accept_rate)
+
+        # Give the scratch forest its own budget so branches stay deep enough
+        # to leave a CANDIDATE frontier after a splice (see build_speculation_cache).
+        self._forest_budget = max(
+            int(cfg.proactive_max_budget), self._budget * (self._branch_len + 1)
+        )
 
         if str(cfg.saguaro_linear) == "auto":
             self._linear = int(cfg.max_branch_width) == 1
@@ -96,12 +108,17 @@ class SaguaroStrategy(OverlapStrategy):
         if not exit_nodes:
             return
 
-        forest = self._pd.draft_forest(exit_nodes, bonus_tokens, self._branch_len)
+        forest = self._pd.draft_forest(
+            exit_nodes,
+            bonus_tokens,
+            self._branch_len,
+            forest_budget=self._forest_budget,
+        )
         if forest is None:
             return
 
         self._cache = build_speculation_cache(
-            forest, exit_nodes, bonus_tokens, self._device
+            self._tree, forest, exit_nodes, bonus_tokens, self._device
         )
 
     def reconcile(
@@ -121,7 +138,11 @@ class SaguaroStrategy(OverlapStrategy):
             else None
         )
 
-        if hit is None or hit.n_tokens == 0:
+        # No hit, or a hit whose branch is too short to leave a CANDIDATE
+        # frontier -> fall back to the plain reorder + bonus token (same tokens,
+        # no reuse); splicing it would leave _grow_tree nothing to extend and
+        # the next verification request would be undersized.
+        if hit is None or not hit.has_frontier:
             reorder_to_verified_path(self._tree, self._engine, self._device, seq_mask)
             append_bonus_token(self._tree, extra_token_id, self._device)
             return OverlapResult(

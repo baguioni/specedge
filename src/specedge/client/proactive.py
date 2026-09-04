@@ -94,12 +94,17 @@ class SpecExecProactiveDraft:
         return best_token_idx, best_token_id, prefix_len, tree_end
 
     @torch.inference_mode()
-    def draft_forest(self, exit_nodes, bonus_tokens, branch_len):
+    def draft_forest(self, exit_nodes, bonus_tokens, branch_len, forest_budget=None):
         """Plant one POST_CANDIDATE root per (exit_node, bonus_token) pair and
         grow ``branch_len`` levels, all inside scratch space past ``tree.end``.
 
         Shares the proactive beam/budget machinery, so the whole forest costs
         ``branch_len`` (wider) forward passes -- not ``branch_len`` per root.
+
+        ``forest_budget`` overrides the total node cap for the forest during
+        growth (default: the proactive ``max_budget``). Size it to about
+        ``B * (branch_len + 1)`` so individual branches stay deep enough to
+        leave a CANDIDATE frontier once one is spliced back in.
 
         Returns ``(forest_start, forest_end, root_indices, root_of)`` or ``None``
         when there is nothing to grow.
@@ -109,47 +114,56 @@ class SpecExecProactiveDraft:
 
         prev_tree_end = self._tree.end
         prev_tree_prefix_len = self._tree.prefix_len
+        saved_budget = self._max_budget
+        if forest_budget is not None:
+            headroom = max(1, self._max_len - int(self._tree.end) - 1)
+            self._max_budget = min(int(forest_budget), headroom)
 
-        self._tree.prefix_len = self._tree.end
-        forest_start = int(self._tree.end)
+        try:
+            self._tree.prefix_len = self._tree.end
+            forest_start = int(self._tree.end)
 
-        root_indices: list[int] = []
-        for exit_idx, bonus in zip(exit_nodes, bonus_tokens, strict=True):
-            self._tree.add(
-                token_ids=torch.tensor([bonus], device=self._device),
-                token_positions=self._tree.positions[exit_idx].reshape(1) + 1,
-                parent_indices=torch.tensor([exit_idx], device=self._device),
-                logprobs=torch.tensor([0.0], device=self._device),
-                token_status=self._tree.POST_CANDIDATE,
-            )
-            root_indices.append(int(self._tree.end) - 1)
-
-        for _ in range(branch_len):
-            logits, parent_indices, parent_scores, parent_positions = (
-                self._process_candidates()
-            )
-            token_ids, token_positions, parent_indices, beam_scores = (
-                self._get_next_beams(
-                    logits, parent_indices, parent_positions, parent_scores
+            root_indices: list[int] = []
+            for exit_idx, bonus in zip(exit_nodes, bonus_tokens, strict=True):
+                self._tree.add(
+                    token_ids=torch.tensor([bonus], device=self._device),
+                    token_positions=self._tree.positions[exit_idx].reshape(1) + 1,
+                    parent_indices=torch.tensor([exit_idx], device=self._device),
+                    logprobs=torch.tensor([0.0], device=self._device),
+                    token_status=self._tree.POST_CANDIDATE,
                 )
+                root_indices.append(int(self._tree.end) - 1)
+
+            for _ in range(branch_len):
+                logits, parent_indices, parent_scores, parent_positions = (
+                    self._process_candidates()
+                )
+                token_ids, token_positions, parent_indices, beam_scores = (
+                    self._get_next_beams(
+                        logits, parent_indices, parent_positions, parent_scores
+                    )
+                )
+
+                if token_ids.size(-1) == 0:
+                    break
+
+                self._tree.add(
+                    token_ids=token_ids,
+                    token_positions=token_positions,
+                    parent_indices=parent_indices,
+                    logprobs=beam_scores,
+                    token_status=self._tree.POST_CANDIDATE,
+                )
+
+            forest_end = int(self._tree.end)
+            root_of = label_forest_roots(
+                self._tree, forest_start, forest_end, root_indices
             )
 
-            if token_ids.size(-1) == 0:
-                break
-
-            self._tree.add(
-                token_ids=token_ids,
-                token_positions=token_positions,
-                parent_indices=parent_indices,
-                logprobs=beam_scores,
-                token_status=self._tree.POST_CANDIDATE,
-            )
-
-        forest_end = int(self._tree.end)
-        root_of = label_forest_roots(self._tree, forest_start, forest_end, root_indices)
-
-        self._tree.prefix_len = prev_tree_prefix_len
-        self._tree.end = prev_tree_end
+            self._tree.prefix_len = prev_tree_prefix_len
+            self._tree.end = prev_tree_end
+        finally:
+            self._max_budget = saved_budget
 
         return forest_start, forest_end, root_indices, root_of
 

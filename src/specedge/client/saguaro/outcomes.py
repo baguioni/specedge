@@ -5,8 +5,12 @@ Given a fan-out budget ``B``, propose the most likely
 
 In *tree* mode the candidate exit points are the draft tree's leaf nodes,
 ranked by cumulative log-prob. In *linear* mode (SpecEdge run with
-``max_branch_width == 1``) every node on the chain is a candidate exit point,
-which recovers the original per-position (accept-depth) enumeration.
+``max_branch_width == 1``) the last confirmed token and every node on the chain
+are candidate exit points, which recovers the original per-position
+(accept-depth) enumeration over ``k = 0 .. K``.
+
+Note that tree mode still omits the zero-accept outcome: the last confirmed
+token is a parent, so the leaf filter drops it.
 """
 
 from __future__ import annotations
@@ -68,15 +72,25 @@ def geometric_fan_out(
 def select_exit_nodes(tree, max_n_beams: int, linear: bool) -> torch.Tensor:
     """Candidate exit points where the verified path may leave the draft tree."""
     device = tree.tokens.device
-    rng = torch.arange(int(tree.prefix_len), int(tree.end), device=device)
-    if rng.numel() == 0:
-        return rng
 
     if linear:
-        nodes = rng
+        # ``prefix_len - 1`` holds the last confirmed token, which is the exit
+        # point for the zero-accept outcome (``k = 0`` in Kumar et al.) -- the
+        # server reports it as ``last_accepted_token_idx = prefix_len - 1``.
+        # Including it both restores that outcome (the most likely single one,
+        # with probability ``1 - a_p``) and keeps the fan-out schedule indexed
+        # by accept depth, so ``fan[k]`` is the budget for ``k`` accepted tokens.
+        start = max(0, int(tree.prefix_len) - 1)
+        nodes = torch.arange(start, int(tree.end), device=device)
     else:
+        rng = torch.arange(int(tree.prefix_len), int(tree.end), device=device)
+        if rng.numel() == 0:
+            return rng
         parents = torch.unique(tree.parents[: int(tree.end)])
         nodes = rng[~torch.isin(rng, parents)]
+
+    if nodes.numel() == 0:
+        return nodes
 
     if nodes.numel() > max_n_beams:
         top = torch.topk(tree.logprobs[nodes], k=int(max_n_beams), sorted=False).indices
@@ -149,8 +163,13 @@ def predict_outcomes(
     if exit_idx.numel() == 0:
         return [], []
 
-    order = torch.argsort(tree.logprobs[exit_idx], descending=True)
-    exit_idx = exit_idx[order]
+    if not linear:
+        # Tree leaves sit at varying depths, so rank them by cumulative log-prob.
+        # In linear mode ``exit_idx`` is already in accept-depth order -- which is
+        # what ``fan`` is indexed by -- so sorting would only re-derive that order
+        # from the (monotonically decreasing) cumulative log-probs along the chain.
+        order = torch.argsort(tree.logprobs[exit_idx], descending=True)
+        exit_idx = exit_idx[order]
 
     K = int(exit_idx.numel()) - 1
     budget = min(int(budget), int(max_n_beams))

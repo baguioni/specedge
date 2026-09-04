@@ -144,7 +144,11 @@ def main(config_file: str):
 
             logger.debug("cmd: %s", cmd)
 
-            if node_name in ["localhost", "127.0.0.1"]:
+            # node_name may be "host" or "host:port" (e.g. VAST.ai remaps SSH
+            # off the default port 22, so a custom port must be specified)
+            ssh_host, _, ssh_port = node_name.partition(":")
+
+            if ssh_host in ["localhost", "127.0.0.1"]:
                 logger.debug("Running locally on %s (no SSH)", node_name)
                 process = subprocess.Popen(  # noqa: S603
                     ["bash", "-c", cmd],  # noqa: S607
@@ -153,9 +157,14 @@ def main(config_file: str):
                     text=True,
                 )
             else:
-                logger.debug("Running via SSH on %s", node_name)
+                ssh_cmd = ["ssh", "-i", ssh_key]
+                if ssh_port:
+                    ssh_cmd += ["-p", ssh_port]
+                ssh_cmd += [ssh_host, cmd]
+
+                logger.debug("Running via SSH on %s (port %s)", ssh_host, ssh_port or 22)
                 process = subprocess.Popen(  # noqa: S603
-                    ["ssh", "-i", ssh_key, node_name, cmd],  # noqa: S607
+                    ssh_cmd,  # noqa: S607
                     stdout=subprocess.PIPE,
                     stderr=sys.stderr.buffer,
                     text=True,

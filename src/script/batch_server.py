@@ -30,7 +30,8 @@ async def serve():
 
     server = grpc.aio.server()
     specedge_pb2_grpc.add_SpecEdgeServiceServicer_to_server(controller, server)
-    server.add_insecure_port("[::]:8000")
+    port = int(os.environ.get("SPECEDGE_PORT", 8080))
+    server.add_insecure_port(f"0.0.0.0:{port}")
 
     try:
         await server.start()
@@ -65,6 +66,7 @@ def _load_config(config_file: Path):
     device = config_yaml["server"]["device"]
     dtype = config_yaml["base"]["dtype"]
     temperature = config_yaml["server"]["temperature"]
+    port = config_yaml["server"].get("port", 8080)
 
     max_batch_size = config_yaml["server"]["max_batch_size"]
     max_n_beams = config_yaml["client"]["max_n_beams"]
@@ -86,6 +88,7 @@ def _load_config(config_file: Path):
     os.environ["SPECEDGE_SERVER_DEVICE"] = device
     os.environ["SPECEDGE_DTYPE"] = dtype
     os.environ["SPECEDGE_TEMPERATURE"] = str(temperature)
+    os.environ["SPECEDGE_PORT"] = str(port)
 
     os.environ["SPECEDGE_MAX_BATCH_SIZE"] = str(max_batch_size)
     os.environ["SPECEDGE_MAX_N_BEAMS"] = str(max_n_beams)
@@ -111,6 +114,7 @@ def _load_config(config_file: Path):
     logger.debug("device: %s", device)
     logger.debug("dtype: %s", dtype)
     logger.debug("temperature: %s", temperature)
+    logger.debug("port: %s", port)
     logger.debug("max_batch_size: %s", max_batch_size)
     logger.debug("max_n_beams: %s", max_n_beams)
     logger.debug("max_budget: %s", max_budget)

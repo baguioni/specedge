@@ -19,7 +19,7 @@ def main(config_file: str):
     exp_name = config["base"]["exp_name"]
     dtype = config["base"]["dtype"]
     seed = config["base"]["seed"]
-    ssh_key = config["base"]["ssh_key"]
+    ssh_key = str(Path(config["base"]["ssh_key"]).expanduser())
     optimization = config["opt"]
     max_len = config["base"]["max_len"]
 
@@ -143,12 +143,23 @@ def main(config_file: str):
             cmd += "bash ./script/client.sh"
 
             logger.debug("cmd: %s", cmd)
-            process = subprocess.Popen(  # noqa: S603
-                ["ssh", "-i", ssh_key, node_name, cmd],  # noqa: S607
-                stdout=subprocess.PIPE,
-                stderr=sys.stderr.buffer,
-                text=True,
-            )
+
+            if node_name in ["localhost", "127.0.0.1"]:
+                logger.debug("Running locally on %s (no SSH)", node_name)
+                process = subprocess.Popen(  # noqa: S603
+                    ["bash", "-c", cmd],  # noqa: S607
+                    stdout=subprocess.PIPE,
+                    stderr=sys.stderr.buffer,
+                    text=True,
+                )
+            else:
+                logger.debug("Running via SSH on %s", node_name)
+                process = subprocess.Popen(  # noqa: S603
+                    ["ssh", "-i", ssh_key, node_name, cmd],  # noqa: S607
+                    stdout=subprocess.PIPE,
+                    stderr=sys.stderr.buffer,
+                    text=True,
+                )
 
             ssh_processes[client_idx] = process
             client_idx += 1

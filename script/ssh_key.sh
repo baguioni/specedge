@@ -3,7 +3,7 @@
 
 set -e
 
-KEY_PATH="$HOME/.ssh/id_25519_server"
+KEY_PATH="$HOME/.ssh/id_ed25519_server"
 KEY_DIR="$(dirname "$KEY_PATH")"
 
 # Create .ssh directory if it doesn't exist

@@ -16,3 +16,10 @@ python -m grpc_tools.protoc \
     --grpc_python_out=./src/specedge_grpc \
     --pyi_out=./src/specedge_grpc \
     specedge.proto
+
+# grpc_tools emits a bare `import specedge_pb2`, which only resolves if
+# src/specedge_grpc is itself on sys.path. Rewrite it to a package-relative
+# import so `from specedge_grpc import specedge_pb2_grpc` works from anywhere.
+sed -i.bak 's/^import specedge_pb2 as specedge__pb2$/from . import specedge_pb2 as specedge__pb2/' \
+    ./src/specedge_grpc/specedge_pb2_grpc.py
+rm -f ./src/specedge_grpc/specedge_pb2_grpc.py.bak

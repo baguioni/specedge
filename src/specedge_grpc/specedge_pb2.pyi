@@ -5,17 +5,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class ValidateRequest(_message.Message):
-    __slots__ = (
-        "client_idx",
-        "req_idx",
-        "input_ids",
-        "position_ids",
-        "cache_seq_indices",
-        "parent_indices",
-        "attention_mask",
-        "prefill",
-        "prefix",
-    )
+    __slots__ = ("client_idx", "req_idx", "input_ids", "position_ids", "cache_seq_indices", "parent_indices", "attention_mask", "prefill", "prefix")
     CLIENT_IDX_FIELD_NUMBER: _ClassVar[int]
     REQ_IDX_FIELD_NUMBER: _ClassVar[int]
     INPUT_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -34,18 +24,7 @@ class ValidateRequest(_message.Message):
     attention_mask: bytes
     prefill: bool
     prefix: str
-    def __init__(
-        self,
-        client_idx: _Optional[int] = ...,
-        req_idx: _Optional[int] = ...,
-        input_ids: _Optional[bytes] = ...,
-        position_ids: _Optional[bytes] = ...,
-        cache_seq_indices: _Optional[bytes] = ...,
-        parent_indices: _Optional[bytes] = ...,
-        attention_mask: _Optional[bytes] = ...,
-        prefill: bool = ...,
-        prefix: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, client_idx: _Optional[int] = ..., req_idx: _Optional[int] = ..., input_ids: _Optional[bytes] = ..., position_ids: _Optional[bytes] = ..., cache_seq_indices: _Optional[bytes] = ..., parent_indices: _Optional[bytes] = ..., attention_mask: _Optional[bytes] = ..., prefill: bool = ..., prefix: _Optional[str] = ...) -> None: ...
 
 class ValidateResponse(_message.Message):
     __slots__ = ("selection", "prefill")
@@ -53,14 +32,22 @@ class ValidateResponse(_message.Message):
     PREFILL_FIELD_NUMBER: _ClassVar[int]
     selection: bytes
     prefill: int
-    def __init__(
-        self, selection: _Optional[bytes] = ..., prefill: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, selection: _Optional[bytes] = ..., prefill: _Optional[int] = ...) -> None: ...
 
 class SyncRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class SyncResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class DoneRequest(_message.Message):
+    __slots__ = ("client_idx",)
+    CLIENT_IDX_FIELD_NUMBER: _ClassVar[int]
+    client_idx: int
+    def __init__(self, client_idx: _Optional[int] = ...) -> None: ...
+
+class DoneResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...

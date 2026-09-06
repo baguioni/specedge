@@ -73,6 +73,16 @@ async def main():
             tokenizer=tokenizer,
         )
 
+    # Tell the server this client is done. When every client has checked in the
+    # server shuts itself down gracefully, so a benchmark sweep does not need a
+    # manual Ctrl+C between runs.
+    try:
+        with grpc.insecure_channel(config.host) as channel:
+            stub = specedge_pb2_grpc.SpecEdgeServiceStub(channel)
+            stub.Done(specedge_pb2.DoneRequest(client_idx=config.client_idx))
+    except grpc.RpcError as e:
+        logger.warning("Done notification failed: %s", e)
+
 
 async def generate(engine, tokenizer, req_idx: int, prompt: str):
     client = SpecExecClient(

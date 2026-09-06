@@ -24,6 +24,7 @@ class SpecExecBatchServer(specedge_pb2_grpc.SpecEdgeServiceServicer):
 
         self._loop = asyncio.get_event_loop()
         self._synced = 0
+        self._finished = 0
         self._num_clients = config.num_clients
         self._all_sync = asyncio.Condition()
 
@@ -83,6 +84,28 @@ class SpecExecBatchServer(specedge_pb2_grpc.SpecEdgeServiceServicer):
                 await self._all_sync.wait()
 
         return specedge_pb2.SyncResponse()
+
+    async def Done(self, request, context):
+        """A client reports it has finished all of its requests.
+
+        Once every client has checked in, trip the shutdown event so the
+        server tears itself down gracefully (same path as SIGINT) instead of
+        waiting for a manual Ctrl+C.
+        """
+        async with self._all_sync:
+            self._finished += 1
+            self._logger.info(
+                "Client %d finished (%d/%d)",
+                request.client_idx,
+                self._finished,
+                self._num_clients,
+            )
+
+            if self._finished >= self._num_clients and self._shutdown_event:
+                self._logger.info("All clients finished, shutting down server")
+                self._shutdown_event.set()
+
+        return specedge_pb2.DoneResponse()
 
     async def Validate(self, request, context):
         self._logger.info("Received request: %s", request.client_idx)

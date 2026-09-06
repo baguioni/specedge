@@ -5,6 +5,7 @@ package specedge;
 service SpecEdgeService {
     rpc Validate (ValidateRequest) returns (ValidateResponse) {}
     rpc Sync (SyncRequest) returns (SyncResponse) {}
+    rpc Done (DoneRequest) returns (DoneResponse) {}
 }
 
 message ValidateRequest {
@@ -26,3 +27,8 @@ message ValidateResponse {
 
 message SyncRequest { }
 message SyncResponse { }
+
+message DoneRequest {
+    int32 client_idx = 1;
+}
+message DoneResponse { }

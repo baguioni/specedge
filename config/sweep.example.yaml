@@ -32,9 +32,14 @@ paths:
   # Local directory to gather result/<exp_name>/ into (relative to this repo).
   collect_to: result/sweep
 
+# Identity file injected as `ssh -i <path>` for BOTH boxes (path is on THIS
+# machine, "~" expanded). Leave empty / omit to rely on ssh defaults or agent.
+# A per-box `ssh:` string that already contains its own -i overrides this.
+ssh_identity: "~/.ssh/vast"
+
 server:
-  # "local", or ssh args as you'd type after `ssh`, e.g. "root@1.2.3.4 -p 22022"
-  # or "-i ~/.ssh/vast -p 22022 root@1.2.3.4".
+  # "local", or ssh args as you'd type after `ssh`, e.g. "root@1.2.3.4 -p 22022".
+  # The key comes from `ssh_identity` above, so this only needs host [+ -p port].
   ssh: "local"
   # Written to server.port of every rendered config -> SPECEDGE_PORT on the box.
   # For VAST.ai this is the CONTAINER-side port chosen by script/vast_ports.sh.

@@ -40,6 +40,10 @@ One-time setup flags, applied (in this order) before the sweep runs:
                     VAST.ai port mapping, overriding the sweep config.
 Combine with --dry-run to do setup only. The port mapping is stable for the
 instance's lifetime, so --discover-ports is needed once per session.
+
+Set `ssh_identity: ~/.ssh/vast` in the sweep config to have every remote ssh /
+scp-equivalent call run as `ssh -i ~/.ssh/vast ...` (a per-box `ssh:` string
+that already has its own -i wins).
 """
 
 from __future__ import annotations
@@ -61,6 +65,10 @@ REPO = Path(__file__).resolve().parent.parent
 POLL = 5.0  # seconds between readiness / liveness polls
 SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 DEFAULT_REPO = "https://github.com/baguioni/specedge"
+
+# Identity file injected as `ssh -i <path>` for every remote box, unless that
+# box's own ssh string already carries a -i. Set from `ssh_identity` in main().
+SSH_IDENTITY: str | None = None
 
 _T0 = time.monotonic()
 
@@ -122,6 +130,14 @@ def root_for(sweep: dict, target: str) -> str:
     return str(REPO) if is_local(target) else sweep["paths"]["remote_root"]
 
 
+def ssh_argv(target: str) -> list[str]:
+    """`ssh` + the global identity (unless `target` already sets -i) + target args."""
+    base = ["ssh"]
+    if SSH_IDENTITY and " -i " not in f" {target} ":
+        base += ["-i", SSH_IDENTITY]
+    return [*base, *shlex.split(str(target))]
+
+
 def run(
     target: str,
     script: str,
@@ -139,7 +155,7 @@ def run(
     if is_local(target):
         argv = ["bash", "-lc", script]
     else:
-        argv = ["ssh", *shlex.split(str(target)), script]
+        argv = [*ssh_argv(target), script]
 
     kw: dict = {}
     if capture:
@@ -431,8 +447,9 @@ def collect(sweep: dict, exp: str) -> bool:
             ok = True
         else:
             # tar over ssh: extract <exp>/ directly under collect_to/
+            ssh_c = " ".join(shlex.quote(a) for a in ssh_argv(t))
             cmd = (
-                f"ssh {t} 'tar -C {root}/{result_rel} -czf - {exp}' "
+                f"{ssh_c} 'tar -C {root}/{result_rel} -czf - {exp}' "
                 f"| tar -C {shlex.quote(str(collect_to))} -xzf -"
             )
             r = subprocess.run(["bash", "-lc", cmd])  # noqa: S603
@@ -524,6 +541,12 @@ def main() -> None:
     if not sweep_path.is_file():
         die("no such sweep config: %s", sweep_path)
     sweep = yaml.safe_load(sweep_path.read_text())
+
+    global SSH_IDENTITY
+    if sweep.get("ssh_identity"):
+        SSH_IDENTITY = os.path.expanduser(str(sweep["ssh_identity"]))
+        if not Path(SSH_IDENTITY).is_file():
+            warn("ssh_identity %s not found on this machine", SSH_IDENTITY)
 
     experiments = sweep.get("experiments") or []
     bad = [e["name"] for e in experiments if not SLUG_RE.match(e.get("name", ""))]

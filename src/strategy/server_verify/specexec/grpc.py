@@ -296,7 +296,10 @@ class InferenceController:
 
         self._kv_prefill_offloading = self._cache_prefill()
 
-        self._logger.debug("Inference controller initialized")
+        # INFO so an orchestrator (script/sweep.py) can grep server stdout for a
+        # reliable "ready to serve Validate" marker after the model + KV cache
+        # have finished loading.
+        self._logger.info("Inference controller initialized")
 
     def _cache_prefill(self):
         # Skip prefill caching if disabled

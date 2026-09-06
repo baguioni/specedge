@@ -19,3 +19,4 @@ config/*
 !config/server_only.example.yaml
 !config/specedge.example.yaml
 !config/mobile.example.yaml
+!config/sweep.example.yaml

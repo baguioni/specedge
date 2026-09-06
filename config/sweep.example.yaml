@@ -1,0 +1,160 @@
+# script/sweep.py — benchmark sweep configuration
+#
+# Runs a matrix of experiments across a SERVER box and a CLIENT box, each of
+# which is either "local" or reachable over SSH. For every experiment sweep.py:
+#   1. renders a config = base_config <- common <- experiment.overrides,
+#      with base.exp_name set to the experiment name;
+#   2. pushes the rendered config to both boxes;
+#   3. starts src/script/batch_server.py on the server box (detached) and waits
+#      for the "Inference controller initialized" marker;
+#   4. runs src/script/client_host.py on the client box until it exits;
+#   5. lets the server shut itself down (clients send Done when finished), with
+#      SIGINT/SIGKILL fallbacks if it overstays;
+#   6. pulls result/<exp_name>/ from both boxes into `collect_to/<exp_name>/`.
+#
+# Then point the metric script at each folder:
+#   python src/metric/specedge.py <collect_to>/<exp_name>
+
+paths:
+  # Template on THIS machine; merged then overridden per experiment.
+  base_config: config/specedge.example.yaml
+  # Repo checkout path on the SSH boxes (ignored for a "local" target, which
+  # uses this repo's root). "~" is expanded by the remote shell.
+  remote_root: "~/specedge"
+  # Used by --bootstrap-repo: cloned into remote_root on each box, then `uv sync`.
+  repo: "https://github.com/baguioni/specedge"
+  repo_ref: ""                  # optional branch / tag / commit to check out
+  # Where rendered per-experiment configs are written (repo-relative, on every
+  # box). Also kept locally for the record.
+  rendered_dir: config/_sweep
+  # Forced into base.result_path of every rendered config (repo-relative).
+  result_path: result/sweep
+  # Local directory to gather result/<exp_name>/ into (relative to this repo).
+  collect_to: result/sweep
+
+server:
+  # "local", or ssh args as you'd type after `ssh`, e.g. "root@1.2.3.4 -p 22022"
+  # or "-i ~/.ssh/vast -p 22022 root@1.2.3.4".
+  ssh: "local"
+  # Written to server.port of every rendered config -> SPECEDGE_PORT on the box.
+  # For VAST.ai this is the CONTAINER-side port chosen by script/vast_ports.sh.
+  port: 8080
+
+client:
+  ssh: "local"
+  # Written to client.host of every rendered config: the server address:port as
+  # seen FROM the client box. For VAST.ai: "<public_ip>:<host_port>" where
+  # host_port maps to the container `port` above.
+  host: "127.0.0.1:8080"
+
+timeouts:
+  server_ready: 900       # s to wait for the readiness marker (model + KV cache load)
+  run: 5400              # s cap for one client_host.py run
+  server_shutdown: 180   # s to wait for the server to self-exit before SIGINT
+  cooldown: 10           # s to pause between experiments
+
+# Line grepped in the server's stdout/log to decide it is ready to serve.
+ready_marker: "Inference controller initialized"
+
+# Deep-merged onto base_config for EVERY experiment, before per-experiment
+# overrides. Put everything that stays constant across the sweep here.
+common:
+  base:
+    max_len: 2048
+    seed: 42
+    dtype: fp16
+  server:
+    target_model: Qwen/Qwen3-14B
+    device: cuda:0
+    temperature: 0.7
+    max_batch_size: 1
+    num_clients: 2
+    batch_type: static
+    cache_prefill: true
+  client:
+    draft_model: Qwen/Qwen3-1.7B
+    dataset: specbench
+    reasoning: false
+    sample_req_cnt: 8
+    req_offset: 0
+    max_n_beams: 32
+    max_beam_len: 4
+    max_branch_width: 16
+    max_budget: 32
+    max_new_tokens: 64
+    max_request_num: -1
+  node:
+    localhost:
+      - device: cuda:0
+
+# One entry per run. `name` -> base.exp_name and the result subfolder.
+# `overrides` is a deep-merge patch applied last.
+experiments:
+  - name: baseline_disabled
+    overrides:
+      client:
+        proactive:
+          type: disabled
+
+  - name: proactive_bl3
+    overrides:
+      client:
+        proactive:
+          type: excluded
+          strategy: proactive
+          max_n_beams: 32
+          max_beam_len: 3
+          max_branch_width: 16
+          max_budget: 32
+
+  - name: proactive_bl4
+    overrides:
+      client:
+        proactive:
+          type: excluded
+          strategy: proactive
+          max_n_beams: 32
+          max_beam_len: 4
+          max_branch_width: 16
+          max_budget: 32
+
+  - name: saguaro_b12_geom
+    overrides:
+      client:
+        proactive:
+          type: excluded
+          strategy: saguaro
+          max_beam_len: 3
+          saguaro:
+            budget: 12
+            branch_len: 3
+            fan_out: geometric
+            init_accept_rate: 0.5
+            linear: auto
+
+  - name: saguaro_b12_uniform
+    overrides:
+      client:
+        proactive:
+          type: excluded
+          strategy: saguaro
+          max_beam_len: 3
+          saguaro:
+            budget: 12
+            branch_len: 3
+            fan_out: uniform
+            linear: auto
+
+  - name: saguaro_b24_geom
+    overrides:
+      client:
+        proactive:
+          type: excluded
+          strategy: saguaro
+          max_beam_len: 3
+          saguaro:
+            budget: 24
+            branch_len: 3
+            fan_out: geometric
+            init_accept_rate: 0.5
+            linear: auto

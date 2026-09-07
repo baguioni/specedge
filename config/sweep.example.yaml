@@ -37,20 +37,21 @@ paths:
 # A per-box `ssh:` string that already contains its own -i overrides this.
 ssh_identity: "~/.ssh/vast"
 
+# server.port and client.host are discovered automatically before every sweep:
+# script/vast_ports.sh --emit on the server box gives the CONTAINER-side port
+# (-> server.port -> SPECEDGE_PORT on the box) and "<public_ip>:<host_port>"
+# (-> client.host, the server address as seen FROM the client box). Only set
+# server.port / client.host below if you run with --no-discover-ports.
+
 server:
-  # "local", or ssh args as you'd type after `ssh`, e.g. "root@1.2.3.4 -p 22022".
-  # The key comes from `ssh_identity` above, so this only needs host [+ -p port].
-  ssh: "local"
-  # Written to server.port of every rendered config -> SPECEDGE_PORT on the box.
-  # For VAST.ai this is the CONTAINER-side port chosen by script/vast_ports.sh.
-  port: 8080
+  # ssh args as you'd type after `ssh`, e.g. "root@1.2.3.4 -p 22022". The key
+  # comes from `ssh_identity` above, so this only needs host [+ -p port].
+  ssh: "root@1.2.3.4 -p 22022"
+  # port: 8080              # only used with --no-discover-ports
 
 client:
-  ssh: "local"
-  # Written to client.host of every rendered config: the server address:port as
-  # seen FROM the client box. For VAST.ai: "<public_ip>:<host_port>" where
-  # host_port maps to the container `port` above.
-  host: "127.0.0.1:8080"
+  ssh: "root@1.2.3.4 -p 22022"
+  # host: "127.0.0.1:8080"  # only used with --no-discover-ports
 
 timeouts:
   server_ready: 900       # s to wait for the readiness marker (model + KV cache load)
@@ -126,7 +127,7 @@ experiments:
             init_accept_rate: 0.5
             linear: auto
 
-   - name: saguaro_geom_linear
+  - name: saguaro_geom_linear
     overrides:
       client:
         proactive:

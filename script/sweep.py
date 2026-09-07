@@ -5,8 +5,9 @@ Drives a matrix of experiments across a server box and a client box (each either
 "local" or an SSH target). For every experiment it:
 
   1. renders a config = base_config <- common <- experiment.overrides, with
-     base.exp_name set to the experiment name and base.result_path / server.port
-     / client.host forced from the sweep config;
+     base.exp_name set to the experiment name and base.result_path forced from
+     the sweep config; server.port / client.host come from port discovery on the
+     server box (or the sweep config, with --no-discover-ports);
   2. pushes the rendered config to both boxes (and keeps a local copy);
   3. starts src/script/batch_server.py on the server box, detached, and waits for
      the readiness marker in its stdout/log;
@@ -22,10 +23,16 @@ Ctrl+C does not leak a GPU process on the server box.
 Usage:
   python script/sweep.py -f config/sweep.example.yaml
   python script/sweep.py -f config/sweep.example.yaml --list
-  python script/sweep.py -f config/sweep.example.yaml --bootstrap-repo --bootstrap-ssh --discover-ports --dry-run
+  python script/sweep.py -f config/sweep.example.yaml --bootstrap-repo --bootstrap-ssh --dry-run
   python script/sweep.py -f config/sweep.example.yaml --only saguaro_b12_geom,proactive_bl3
   python script/sweep.py -f config/sweep.example.yaml --from proactive_bl4
   python script/sweep.py -f config/sweep.example.yaml --dry-run      # render configs only
+
+This script targets remote SSH boxes. Before every sweep it runs
+script/vast_ports.sh --emit on the server box and sets server.port
+(SPECEDGE_PORT) + client.host from the live VAST.ai port mapping. Pass
+--no-discover-ports to skip that and read server.port / client.host from the
+sweep config instead (e.g. a non-VAST box).
 
 One-time setup flags, applied (in this order) before the sweep runs:
   --bootstrap-repo  clone paths.repo into remote_root on the server and client
@@ -35,11 +42,7 @@ One-time setup flags, applied (in this order) before the sweep runs:
   --bootstrap-ssh   keygen on the client box (script/ssh_key.sh), then append its
                     public key to ~/.ssh/authorized_keys on the server box and on
                     the client box itself.
-  --discover-ports  run script/vast_ports.sh --emit on the server box and set
-                    server.port (SPECEDGE_PORT) + client.host from the live
-                    VAST.ai port mapping, overriding the sweep config.
-Combine with --dry-run to do setup only. The port mapping is stable for the
-instance's lifetime, so --discover-ports is needed once per session.
+Combine with --dry-run to do setup only.
 
 Set `ssh_identity: ~/.ssh/vast` in the sweep config to have every remote ssh /
 scp-equivalent call run as `ssh -i ~/.ssh/vast ...` (a per-box `ssh:` string
@@ -114,8 +117,16 @@ def render_config(sweep: dict, base_cfg: dict, experiment: dict) -> dict:
 
     cfg["base"]["exp_name"] = experiment["name"]
     cfg["base"]["result_path"] = sweep["paths"]["result_path"]
-    cfg["server"]["port"] = sweep["server"]["port"]
-    cfg["client"]["host"] = sweep["client"]["host"]
+    # server.port / client.host are populated by port discovery (the default) or,
+    # with --no-discover-ports, taken straight from the sweep config; either way
+    # they are set on `sweep` by the time we render. If neither supplied them,
+    # keep whatever base_config already had.
+    port = sweep.get("server", {}).get("port")
+    host = sweep.get("client", {}).get("host")
+    if port is not None:
+        cfg["server"]["port"] = port
+    if host:
+        cfg["client"]["host"] = host
     return cfg
 
 
@@ -284,7 +295,7 @@ def bootstrap_ssh(sweep: dict, base_cfg: dict) -> None:
         run(client, authorize, check=True)
 
     hosts: set[str] = set()
-    server_host = str(sweep["client"]["host"]).rsplit(":", 1)[0].strip()
+    server_host = str(sweep["client"].get("host", "")).rsplit(":", 1)[0].strip()
     if server_host:
         hosts.add(server_host)
     for node_name in (merged.get("node") or {}):
@@ -313,7 +324,8 @@ def discover_ports(sweep: dict) -> None:
     if r.returncode != 0:
         raise RuntimeError(
             f"vast_ports.sh --emit failed on the server box (rc={r.returncode}): "
-            f"{(r.stderr or b'').decode(errors='replace').strip()[:400]}"
+            f"{(r.stderr or b'').decode(errors='replace').strip()[:400]}\n"
+            f"(pass --no-discover-ports to read server.port / client.host from the config)"
         )
 
     kv: dict[str, str] = {}
@@ -521,7 +533,8 @@ def main() -> None:
     ap.add_argument("-f", "--config", default="config/sweep.example.yaml", help="sweep config (default: config/sweep.example.yaml)")
     ap.add_argument("--only", help="comma-separated experiment names to run")
     ap.add_argument("--from", dest="start_from", help="start at this experiment, run the rest")
-    ap.add_argument("--dry-run", action="store_true", help="render configs locally and exit")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="render configs and exit (still discovers ports unless --no-discover-ports)")
     ap.add_argument("--list", action="store_true", help="list experiment names and exit")
     ap.add_argument("--no-collect", action="store_true", help="skip pulling results back")
     ap.add_argument("--bootstrap-repo", action="store_true",
@@ -530,9 +543,9 @@ def main() -> None:
     ap.add_argument("--bootstrap-ssh", action="store_true",
                     help="run script/ssh_key.sh on the client box and authorize its "
                          "public key on the server box (and the client box itself)")
-    ap.add_argument("--discover-ports", action="store_true",
-                    help="run script/vast_ports.sh --emit on the server box and set "
-                         "server.port / client.host from the live VAST.ai mapping")
+    ap.add_argument("--no-discover-ports", action="store_true",
+                    help="skip automatic port discovery; read server.port / "
+                         "client.host from the sweep config instead")
     args = ap.parse_args()
 
     sweep_path = Path(args.config)
@@ -571,15 +584,23 @@ def main() -> None:
         except RuntimeError as e:
             die("%s", e)
 
-    if args.bootstrap_ssh:
+    if args.no_discover_ports:
+        missing = [
+            f"{role}.{key}"
+            for role, key in (("server", "port"), ("client", "host"))
+            if not sweep.get(role, {}).get(key)
+        ]
+        if missing:
+            die("--no-discover-ports needs %s set in the sweep config", ", ".join(missing))
+    else:
         try:
-            bootstrap_ssh(sweep, base_cfg)
+            discover_ports(sweep)
         except RuntimeError as e:
             die("%s", e)
 
-    if args.discover_ports:
+    if args.bootstrap_ssh:
         try:
-            discover_ports(sweep)
+            bootstrap_ssh(sweep, base_cfg)
         except RuntimeError as e:
             die("%s", e)
 

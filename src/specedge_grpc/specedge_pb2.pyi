@@ -35,18 +35,26 @@ class ValidateResponse(_message.Message):
     def __init__(self, selection: _Optional[bytes] = ..., prefill: _Optional[int] = ...) -> None: ...
 
 class SyncRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("client_idx", "exp_name", "result_path")
+    CLIENT_IDX_FIELD_NUMBER: _ClassVar[int]
+    EXP_NAME_FIELD_NUMBER: _ClassVar[int]
+    RESULT_PATH_FIELD_NUMBER: _ClassVar[int]
+    client_idx: int
+    exp_name: str
+    result_path: str
+    def __init__(self, client_idx: _Optional[int] = ..., exp_name: _Optional[str] = ..., result_path: _Optional[str] = ...) -> None: ...
 
 class SyncResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class DoneRequest(_message.Message):
-    __slots__ = ("client_idx",)
+    __slots__ = ("client_idx", "shutdown")
     CLIENT_IDX_FIELD_NUMBER: _ClassVar[int]
+    SHUTDOWN_FIELD_NUMBER: _ClassVar[int]
     client_idx: int
-    def __init__(self, client_idx: _Optional[int] = ...) -> None: ...
+    shutdown: bool
+    def __init__(self, client_idx: _Optional[int] = ..., shutdown: bool = ...) -> None: ...
 
 class DoneResponse(_message.Message):
     __slots__ = ()

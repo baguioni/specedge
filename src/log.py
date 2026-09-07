@@ -60,6 +60,11 @@ def get_default_log_config(log_dir: Path, file_name: str):
 
     return {
         "version": 1,
+        # A persistent batch server calls configure_logging again for every
+        # experiment (to re-point the file/result handlers). Keep loggers that
+        # were created between calls -- notably ResultLogger's
+        # "custom_log_result." child -- alive instead of disabling them.
+        "disable_existing_loggers": False,
         "formatters": {
             "iso": {"()": f"{__name__}.ISOFormatter"},
             "simple": {

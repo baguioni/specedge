@@ -73,7 +73,7 @@ common:
     device: cuda:0
     temperature: 0.7
     max_batch_size: 1
-    num_clients: 2
+    num_clients: 1
     batch_type: static
     cache_prefill: true
   client:
@@ -101,7 +101,7 @@ experiments:
         proactive:
           type: disabled
 
-  - name: proactive_bl3
+  - name: proactive
     overrides:
       client:
         proactive:
@@ -112,18 +112,7 @@ experiments:
           max_branch_width: 16
           max_budget: 32
 
-  - name: proactive_bl4
-    overrides:
-      client:
-        proactive:
-          type: excluded
-          strategy: proactive
-          max_n_beams: 32
-          max_beam_len: 4
-          max_branch_width: 16
-          max_budget: 32
-
-  - name: saguaro_b12_geom
+  - name: saguaro_geom
     overrides:
       client:
         proactive:
@@ -131,13 +120,13 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 12
-            branch_len: 3
+            budget: 6
+            branch_len: 6
             fan_out: geometric
             init_accept_rate: 0.5
             linear: auto
 
-  - name: saguaro_b12_uniform
+   - name: saguaro_geom_linear
     overrides:
       client:
         proactive:
@@ -145,12 +134,26 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 12
-            branch_len: 3
+            budget: 6
+            branch_len: 6
+            fan_out: geometric
+            init_accept_rate: 0.5
+            linear: true
+
+  - name: saguaro_uniform
+    overrides:
+      client:
+        proactive:
+          type: excluded
+          strategy: saguaro
+          max_beam_len: 3
+          saguaro:
+            budget: 6
+            branch_len: 6
             fan_out: uniform
             linear: auto
 
-  - name: saguaro_b24_geom
+  - name: saguaro_uniform_linear
     overrides:
       client:
         proactive:
@@ -158,8 +161,9 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 24
-            branch_len: 3
-            fan_out: geometric
-            init_accept_rate: 0.5
-            linear: auto
+            budget: 6
+            branch_len: 6
+            fan_out: uniform
+            linear: linear
+
+

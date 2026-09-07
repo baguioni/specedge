@@ -61,7 +61,15 @@ async def main():
 
     with grpc.insecure_channel(config.host) as channel:
         stub = specedge_pb2_grpc.SpecEdgeServiceStub(channel)
-        _ = stub.Sync(specedge_pb2.SyncRequest())
+        # exp_name / result_path travel with the sync so a persistent server can
+        # re-point its result logger at this run's folder without a restart.
+        _ = stub.Sync(
+            specedge_pb2.SyncRequest(
+                client_idx=config.client_idx,
+                exp_name=config.exp_name,
+                result_path=config.result_path,
+            )
+        )
 
     logger.info("Starting %s requests", config.max_request_num)
     for i, req_idx in enumerate(req_indices):
@@ -73,9 +81,10 @@ async def main():
             tokenizer=tokenizer,
         )
 
-    # Tell the server this client is done. When every client has checked in the
-    # server shuts itself down gracefully, so a benchmark sweep does not need a
-    # manual Ctrl+C between runs.
+    # Tell the server this client is done with the current experiment. Once
+    # every client has checked in the server re-arms for the next run's Sync;
+    # it is torn down separately (SIGINT, or a Done with shutdown=True from the
+    # sweep orchestrator) after the last experiment.
     try:
         with grpc.insecure_channel(config.host) as channel:
             stub = specedge_pb2_grpc.SpecEdgeServiceStub(channel)

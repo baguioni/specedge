@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0especedge.proto\x12\x08specedge\"\xdb\x01\n\x0fValidateRequest\x12\x12\n\nclient_idx\x18\x01 \x01(\x05\x12\x0f\n\x07req_idx\x18\x02 \x01(\x05\x12\x11\n\tinput_ids\x18\x03 \x01(\x0c\x12\x14\n\x0cposition_ids\x18\x04 \x01(\x0c\x12\x19\n\x11\x63\x61\x63he_seq_indices\x18\x05 \x01(\x0c\x12\x16\n\x0eparent_indices\x18\x06 \x01(\x0c\x12\x16\n\x0e\x61ttention_mask\x18\x07 \x01(\x0c\x12\x0f\n\x07prefill\x18\x08 \x01(\x08\x12\x13\n\x06prefix\x18\t \x01(\tH\x00\x88\x01\x01\x42\t\n\x07_prefix\"6\n\x10ValidateResponse\x12\x11\n\tselection\x18\x01 \x01(\x0c\x12\x0f\n\x07prefill\x18\x02 \x01(\x05\"\r\n\x0bSyncRequest\"\x0e\n\x0cSyncResponse\"!\n\x0b\x44oneRequest\x12\x12\n\nclient_idx\x18\x01 \x01(\x05\"\x0e\n\x0c\x44oneResponse2\xc8\x01\n\x0fSpecEdgeService\x12\x43\n\x08Validate\x12\x19.specedge.ValidateRequest\x1a\x1a.specedge.ValidateResponse\"\x00\x12\x37\n\x04Sync\x12\x15.specedge.SyncRequest\x1a\x16.specedge.SyncResponse\"\x00\x12\x37\n\x04\x44one\x12\x15.specedge.DoneRequest\x1a\x16.specedge.DoneResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0especedge.proto\x12\x08specedge\"\xdb\x01\n\x0fValidateRequest\x12\x12\n\nclient_idx\x18\x01 \x01(\x05\x12\x0f\n\x07req_idx\x18\x02 \x01(\x05\x12\x11\n\tinput_ids\x18\x03 \x01(\x0c\x12\x14\n\x0cposition_ids\x18\x04 \x01(\x0c\x12\x19\n\x11\x63\x61\x63he_seq_indices\x18\x05 \x01(\x0c\x12\x16\n\x0eparent_indices\x18\x06 \x01(\x0c\x12\x16\n\x0e\x61ttention_mask\x18\x07 \x01(\x0c\x12\x0f\n\x07prefill\x18\x08 \x01(\x08\x12\x13\n\x06prefix\x18\t \x01(\tH\x00\x88\x01\x01\x42\t\n\x07_prefix\"6\n\x10ValidateResponse\x12\x11\n\tselection\x18\x01 \x01(\x0c\x12\x0f\n\x07prefill\x18\x02 \x01(\x05\"H\n\x0bSyncRequest\x12\x12\n\nclient_idx\x18\x01 \x01(\x05\x12\x10\n\x08\x65xp_name\x18\x02 \x01(\t\x12\x13\n\x0bresult_path\x18\x03 \x01(\t\"\x0e\n\x0cSyncResponse\"3\n\x0b\x44oneRequest\x12\x12\n\nclient_idx\x18\x01 \x01(\x05\x12\x10\n\x08shutdown\x18\x02 \x01(\x08\"\x0e\n\x0c\x44oneResponse2\xc8\x01\n\x0fSpecEdgeService\x12\x43\n\x08Validate\x12\x19.specedge.ValidateRequest\x1a\x1a.specedge.ValidateResponse\"\x00\x12\x37\n\x04Sync\x12\x15.specedge.SyncRequest\x1a\x16.specedge.SyncResponse\"\x00\x12\x37\n\x04\x44one\x12\x15.specedge.DoneRequest\x1a\x16.specedge.DoneResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,13 +36,13 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_VALIDATERESPONSE']._serialized_start=250
   _globals['_VALIDATERESPONSE']._serialized_end=304
   _globals['_SYNCREQUEST']._serialized_start=306
-  _globals['_SYNCREQUEST']._serialized_end=319
-  _globals['_SYNCRESPONSE']._serialized_start=321
-  _globals['_SYNCRESPONSE']._serialized_end=335
-  _globals['_DONEREQUEST']._serialized_start=337
-  _globals['_DONEREQUEST']._serialized_end=370
-  _globals['_DONERESPONSE']._serialized_start=372
-  _globals['_DONERESPONSE']._serialized_end=386
-  _globals['_SPECEDGESERVICE']._serialized_start=389
-  _globals['_SPECEDGESERVICE']._serialized_end=589
+  _globals['_SYNCREQUEST']._serialized_end=378
+  _globals['_SYNCRESPONSE']._serialized_start=380
+  _globals['_SYNCRESPONSE']._serialized_end=394
+  _globals['_DONEREQUEST']._serialized_start=396
+  _globals['_DONEREQUEST']._serialized_end=447
+  _globals['_DONERESPONSE']._serialized_start=449
+  _globals['_DONERESPONSE']._serialized_end=463
+  _globals['_SPECEDGESERVICE']._serialized_start=466
+  _globals['_SPECEDGESERVICE']._serialized_end=666
 # @@protoc_insertion_point(module_scope)

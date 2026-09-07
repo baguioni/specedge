@@ -25,10 +25,21 @@ message ValidateResponse {
     int32 prefill = 2;
 }
 
-message SyncRequest { }
+message SyncRequest {
+    // Clients sync at the start of every experiment. exp_name / result_path let
+    // a persistent server re-point its result logger at the new run's folder
+    // without a restart (see SpecExecBatchServer.Sync).
+    int32 client_idx = 1;
+    string exp_name = 2;
+    string result_path = 3;
+}
 message SyncResponse { }
 
 message DoneRequest {
     int32 client_idx = 1;
+    // Set by an orchestrator (not a normal client) once the whole sweep is
+    // done, to trip the server's graceful shutdown. A plain Done just marks
+    // this client finished; the server then re-arms for the next experiment.
+    bool shutdown = 2;
 }
 message DoneResponse { }

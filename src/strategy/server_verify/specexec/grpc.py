@@ -28,6 +28,10 @@ class SpecExecBatchServer(specedge_pb2_grpc.SpecEdgeServiceServicer):
         self._num_clients = config.num_clients
         self._all_sync = asyncio.Condition()
 
+        # (exp_name, result_path) reported by clients on their most recent Sync;
+        # forwarded to the inference process once every client has synced.
+        self._pending_exp: tuple[str, str] | None = None
+
         self._shutdown_event = shutdown_event
         self._resp_queue_task = None
 
@@ -77,8 +81,27 @@ class SpecExecBatchServer(specedge_pb2_grpc.SpecEdgeServiceServicer):
         async with self._all_sync:
             self._synced += 1
 
+            # Every client sends the same experiment identity; last writer wins.
+            if request.exp_name:
+                self._pending_exp = (request.exp_name, request.result_path)
+
             if self._synced == self._num_clients:
                 self._synced = 0
+                self._finished = 0
+
+                # All clients are here -> a new experiment is starting. Tell the
+                # inference process to re-point its result logger at this run's
+                # folder and drop KV state left over from the previous run.
+                if self._pending_exp is not None:
+                    exp_name, result_path = self._pending_exp
+                    self._recv_queue.put(
+                        {
+                            "type": "begin_experiment",
+                            "exp_name": exp_name,
+                            "result_path": result_path,
+                        }
+                    )
+
                 self._all_sync.notify_all()
             else:
                 await self._all_sync.wait()
@@ -86,12 +109,22 @@ class SpecExecBatchServer(specedge_pb2_grpc.SpecEdgeServiceServicer):
         return specedge_pb2.SyncResponse()
 
     async def Done(self, request, context):
-        """A client reports it has finished all of its requests.
+        """A client reports it has finished the current experiment.
 
-        Once every client has checked in, trip the shutdown event so the
-        server tears itself down gracefully (same path as SIGINT) instead of
-        waiting for a manual Ctrl+C.
+        With shutdown=True (sent by the sweep orchestrator once the whole sweep
+        is done) the server trips its graceful shutdown, same path as SIGINT.
+        Otherwise it just counts the client; once every client has checked in
+        the server re-arms and waits for the next experiment's Sync.
         """
+        if request.shutdown:
+            self._logger.info(
+                "Shutdown requested (client %d); tearing down server",
+                request.client_idx,
+            )
+            if self._shutdown_event:
+                self._shutdown_event.set()
+            return specedge_pb2.DoneResponse()
+
         async with self._all_sync:
             self._finished += 1
             self._logger.info(
@@ -101,9 +134,11 @@ class SpecExecBatchServer(specedge_pb2_grpc.SpecEdgeServiceServicer):
                 self._num_clients,
             )
 
-            if self._finished >= self._num_clients and self._shutdown_event:
-                self._logger.info("All clients finished, shutting down server")
-                self._shutdown_event.set()
+            if self._finished >= self._num_clients:
+                self._logger.info(
+                    "All clients finished; re-arming for the next experiment"
+                )
+                self._finished = 0
 
         return specedge_pb2.DoneResponse()
 
@@ -202,6 +237,7 @@ class InferenceController:
         self._max_n_beams = self._max_budget + 1
         self._max_len = config.max_len
         self._batch_type = config.batch_type
+        self._exp_name = config.exp_name
         self.dataset = util.load_dataset(config.dataset, config.target_model)
 
         self._request_batches: list[specedge_pb2.ValidateRequest] = []
@@ -385,6 +421,32 @@ class InferenceController:
 
         return kv_prefill_offloading
 
+    def _begin_experiment(self, exp_name: str, result_path: str) -> None:
+        """Serve the next benchmark run without a restart.
+
+        Re-points the file + result-JSONL handlers at result/<exp_name>/ and
+        drops per-client KV state so the new run's clients start clean. The
+        model, CUDA graphs and prefill cache -- all held constant across a
+        sweep -- are left untouched.
+        """
+        if exp_name != self._exp_name:
+            log_dir = Path(result_path) / exp_name
+            log.configure_logging(log.get_default_log_config(log_dir, "server"))
+            self._logger = log.get_logger()
+            self._result_logger = log.get_result_logger()
+            self._exp_name = exp_name
+            self._logger.info(
+                "Serving experiment %r (results -> %s)", exp_name, log_dir
+            )
+        else:
+            self._logger.info("Re-arming for experiment %r", exp_name)
+
+        self._engine._past_key_values.clear()
+        self.k_cache.zero_()
+        self.v_cache.zero_()
+        self._iter_idx.zero_()
+        self._request_batches.clear()
+
     def loop(self):
         self._logger.debug("Starting inference loop")
         while True:
@@ -427,6 +489,16 @@ class InferenceController:
 
                         self._logger.info("Inference loop shutting down gracefully")
                         return
+
+                    # Control message: the next benchmark experiment is
+                    # starting. Re-point logging + drop stale KV state, then
+                    # keep waiting for real requests.
+                    if isinstance(raw_data, dict):
+                        if raw_data.get("type") == "begin_experiment":
+                            self._begin_experiment(
+                                raw_data["exp_name"], raw_data["result_path"]
+                            )
+                        continue
 
                     req = specedge_pb2.ValidateRequest()
                     req.ParseFromString(raw_data)

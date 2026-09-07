@@ -26,9 +26,13 @@ Usage:
   python script/sweep.py -f config/sweep.example.yaml --bootstrap-repo --bootstrap-ssh --dry-run
   python script/sweep.py -f config/sweep.example.yaml --only saguaro_b12_geom,proactive_bl3
   python script/sweep.py -f config/sweep.example.yaml --from proactive_bl4
-  python script/sweep.py -f config/sweep.example.yaml --dry-run      # render configs only
+  python script/sweep.py -f config/sweep.example.yaml --dry-run      # render merged configs only
 
-This script targets remote SSH boxes. Before every sweep it runs
+--dry-run renders the fully merged per-experiment configs to paths.rendered_dir
+and exits without touching any box (no port discovery, no server/client launch);
+server.port / client.host appear only if set in the sweep config.
+
+For a real run this script targets remote SSH boxes. Before every sweep it runs
 script/vast_ports.sh --emit on the server box and sets server.port
 (SPECEDGE_PORT) + client.host from the live VAST.ai port mapping. Pass
 --no-discover-ports to skip that and read server.port / client.host from the
@@ -141,9 +145,11 @@ def root_for(sweep: dict, target: str) -> str:
     return str(REPO) if is_local(target) else sweep["paths"]["remote_root"]
 
 
-def ssh_argv(target: str) -> list[str]:
+def ssh_argv(target: str, *, quiet: bool = False) -> list[str]:
     """`ssh` + the global identity (unless `target` already sets -i) + target args."""
     base = ["ssh"]
+    if quiet:
+        base.append("-q")
     if SSH_IDENTITY and " -i " not in f" {target} ":
         base += ["-i", SSH_IDENTITY]
     return [*base, *shlex.split(str(target))]
@@ -204,7 +210,7 @@ def put_config(target: str, remote_root: str, rel_path: str, content: str) -> No
     remote_path = f"{remote_root.rstrip('/')}/{rel_path}"
     remote_dir = remote_path.rsplit("/", 1)[0]
     run(target, f"mkdir -p {remote_dir} && cat > {remote_path}",
-        input_bytes=content.encode(), check=True)
+        input_bytes=content.encode(), check=True, timeout=120)
 
 
 def _targets(sweep: dict) -> list[str]:
@@ -241,7 +247,8 @@ def bootstrap_repo(sweep: dict) -> None:
                 f"if [ -d {root}/.git ]; then "
                 f"git -C {root} fetch --all --prune; "
                 f"{co_old}git -C {root} pull --ff-only || true; "
-                f"else git clone {shlex.quote(repo)} {root}{co_new}; fi"
+                f"else mkdir -p \"$(dirname {root})\" && "
+                f"git clone {shlex.quote(repo)} {root}{co_new}; fi"
             )
             info("%s: clone/update %s -> %s%s", label, repo, root, f" @ {ref}" if ref else "")
             run(t, f"bash -lc {shlex.quote(inner)}", check=True)
@@ -339,6 +346,8 @@ def discover_ports(sweep: dict) -> None:
         raise RuntimeError(f"vast_ports.sh --emit missing {missing}; stdout was {out_of(r)!r}")
     if not (kv["CONTAINER_PORT"].isdigit() and kv["HOST_PORT"].isdigit()):
         raise RuntimeError(f"vast_ports.sh --emit returned non-numeric ports: {kv}")
+    if not (0 < int(kv["CONTAINER_PORT"]) < 65536 and 0 < int(kv["HOST_PORT"]) < 65536):
+        raise RuntimeError(f"vast_ports.sh --emit returned out-of-range ports: {kv}")
 
     sweep["server"]["port"] = int(kv["CONTAINER_PORT"])
     sweep["client"]["host"] = f"{kv['PUBLIC_IP']}:{kv['HOST_PORT']}"
@@ -353,21 +362,62 @@ def start_server(sweep: dict, cfg_rel: str, exp: str) -> int:
     port = sweep["server"]["port"]
     out = f"{result_rel}/{exp}/server.stdout"
 
+    # setsid + </dev/null so the launcher ssh returns immediately instead of
+    # staying attached to the backgrounded server (which wedges `run()` forever).
     script = (
         f"cd {root} && "
         f"source .venv/bin/activate && "
         f"mkdir -p {result_rel}/{exp} && "
         f": > {out} && "
-        f"SPECEDGE_PORT={port} nohup python -O src/script/batch_server.py "
-        f"--config {cfg_rel} > {out} 2>&1 & echo $!"
+        f"SPECEDGE_PORT={port} setsid nohup python -O src/script/batch_server.py "
+        f"--config {cfg_rel} </dev/null >{out} 2>&1 & echo $!"
     )
-    r = run(target, script, capture=True, check=True)
+    info("launching server on %s ...", target if not is_local(target) else "local")
+    try:
+        r = run(target, script, capture=True, check=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"server launch on {target!r} did not return within 180s; "
+            f"check {root}/{out} on the box"
+        )
     lines = [ln.strip() for ln in out_of(r).splitlines() if ln.strip()]
     if not lines or not lines[-1].isdigit():
         raise RuntimeError(f"could not read server PID (stdout={out_of(r)!r}, stderr={(r.stderr or b'').decode()!r})")
     pid = int(lines[-1])
     info("server started on %s (pid %d), config %s", target if not is_local(target) else "local", pid, cfg_rel)
     return pid
+
+
+def tail_server_log(sweep: dict, exp: str) -> subprocess.Popen | None:
+    """Start a background `tail -F` of the server box's server.stdout, streaming
+    it to this terminal with a `[server]` prefix. Returns the Popen to stop
+    later, or None if it could not be started.
+    """
+    target = sweep["server"]["ssh"]
+    root = root_for(sweep, target)
+    fpath = f"{root}/{sweep['paths']['result_path']}/{exp}/server.stdout"
+    pipeline = (
+        f"tail -n +1 -F {shlex.quote(fpath)} 2>/dev/null "
+        f"| awk '{{ print \"[server] \" $0; fflush() }}'"
+    )
+    argv = ["bash", "-lc", pipeline] if is_local(target) else [*ssh_argv(target, quiet=True), pipeline]
+    try:
+        proc = subprocess.Popen(argv)  # noqa: S603  (stdio inherited -> streams live)
+    except OSError as e:
+        warn("could not start server-log tail for %s: %s", exp, e)
+        return None
+    info("streaming server log for %s (lines prefixed [server])", exp)
+    return proc
+
+
+def stop_tail(proc: subprocess.Popen | None) -> None:
+    if proc is None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def pid_alive(target: str, pid: int) -> bool:
@@ -489,7 +539,8 @@ def select(experiments: list[dict], only: str | None, start_from: str | None) ->
     return experiments
 
 
-def run_one(sweep: dict, base_cfg: dict, experiment: dict, *, no_collect: bool) -> dict:
+def run_one(sweep: dict, base_cfg: dict, experiment: dict, *, no_collect: bool,
+            tail_server: bool = False) -> dict:
     exp = experiment["name"]
     rel = f"{sweep['paths']['rendered_dir'].rstrip('/')}/{exp}.yaml"
     rec: dict = {"name": exp, "status": "pending", "config": rel}
@@ -497,26 +548,30 @@ def run_one(sweep: dict, base_cfg: dict, experiment: dict, *, no_collect: bool) 
     cfg = render_config(sweep, base_cfg, experiment)
     content = yaml.safe_dump(cfg, sort_keys=False)
 
-    put_config(sweep["server"]["ssh"], sweep["paths"]["remote_root"], rel, content)
-    if sweep["client"]["ssh"] != sweep["server"]["ssh"]:
-        put_config(sweep["client"]["ssh"], sweep["paths"]["remote_root"], rel, content)
-
     t_start = time.time()
     pid = None
+    tail = None
     try:
+        put_config(sweep["server"]["ssh"], sweep["paths"]["remote_root"], rel, content)
+        if sweep["client"]["ssh"] != sweep["server"]["ssh"]:
+            put_config(sweep["client"]["ssh"], sweep["paths"]["remote_root"], rel, content)
+
         pid = start_server(sweep, rel, exp)
+        if tail_server:
+            tail = tail_server_log(sweep, exp)
         wait_for_ready(sweep, exp, pid)
 
         rc = run_client_host(sweep, rel)
         rec["client_rc"] = rc
         rec["status"] = "ok" if rc == 0 else "client_failed"
-    except (RuntimeError, TimeoutError) as e:
+    except (RuntimeError, TimeoutError, subprocess.TimeoutExpired) as e:
         rec["status"] = "error"
         rec["error"] = str(e).splitlines()[0][:300]
         warn("%s: %s", exp, e)
     finally:
         if pid is not None:
             rec["shutdown"] = stop_server(sweep, pid)
+        stop_tail(tail)
 
     rec["elapsed_s"] = round(time.time() - t_start, 1)
 
@@ -534,9 +589,13 @@ def main() -> None:
     ap.add_argument("--only", help="comma-separated experiment names to run")
     ap.add_argument("--from", dest="start_from", help="start at this experiment, run the rest")
     ap.add_argument("--dry-run", action="store_true",
-                    help="render configs and exit (still discovers ports unless --no-discover-ports)")
+                    help="render the merged per-experiment configs to rendered_dir and "
+                         "exit; touches no box (no discovery, no launch)")
     ap.add_argument("--list", action="store_true", help="list experiment names and exit")
     ap.add_argument("--no-collect", action="store_true", help="skip pulling results back")
+    ap.add_argument("--tail-server", action="store_true",
+                    help="stream the server box's stdout to this terminal (lines "
+                         "prefixed [server]) while each experiment runs")
     ap.add_argument("--bootstrap-repo", action="store_true",
                     help="clone <paths.repo> into remote_root and run `uv sync` on "
                          "the server and client boxes")
@@ -584,7 +643,9 @@ def main() -> None:
         except RuntimeError as e:
             die("%s", e)
 
-    if args.no_discover_ports:
+    if args.dry_run:
+        pass  # pure local render below -- no discovery, no remote calls
+    elif args.no_discover_ports:
         missing = [
             f"{role}.{key}"
             for role, key in (("server", "port"), ("client", "host"))
@@ -623,7 +684,8 @@ def main() -> None:
     results: list[dict] = []
     try:
         for e in chosen:
-            results.append(run_one(sweep, base_cfg, e, no_collect=args.no_collect))
+            results.append(run_one(sweep, base_cfg, e, no_collect=args.no_collect,
+                                   tail_server=args.tail_server))
     except KeyboardInterrupt:
         warn("interrupted; the current server (if any) was torn down in finally")
 

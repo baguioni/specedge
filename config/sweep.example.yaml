@@ -19,8 +19,9 @@ paths:
   # Template on THIS machine; merged then overridden per experiment.
   base_config: config/specedge.example.yaml
   # Repo checkout path on the SSH boxes (ignored for a "local" target, which
-  # uses this repo's root). "~" is expanded by the remote shell.
-  remote_root: "~/specedge"
+  # uses this repo's root). --bootstrap-repo clones paths.repo to here and every
+  # remote command runs from this directory; its parent must already exist.
+  remote_root: "/workspace/specedge"
   # Used by --bootstrap-repo: cloned into remote_root on each box, then `uv sync`.
   repo: "https://github.com/baguioni/specedge"
   repo_ref: ""                  # optional branch / tag / commit to check out
@@ -46,11 +47,11 @@ ssh_identity: "~/.ssh/vast"
 server:
   # ssh args as you'd type after `ssh`, e.g. "root@1.2.3.4 -p 22022". The key
   # comes from `ssh_identity` above, so this only needs host [+ -p port].
-  ssh: "root@1.2.3.4 -p 22022"
+  ssh: "root@202.122.49.242  -p 11129"
   # port: 8080              # only used with --no-discover-ports
 
 client:
-  ssh: "root@1.2.3.4 -p 22022"
+  ssh: "root@64.64.224.51 -p 30142"
   # host: "127.0.0.1:8080"  # only used with --no-discover-ports
 
 timeouts:
@@ -121,8 +122,8 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 6
-            branch_len: 6
+            budget: 8
+            branch_len: 3
             fan_out: geometric
             init_accept_rate: 0.5
             linear: auto
@@ -135,8 +136,8 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 6
-            branch_len: 6
+            budget: 8
+            branch_len: 3
             fan_out: geometric
             init_accept_rate: 0.5
             linear: true
@@ -149,8 +150,8 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 6
-            branch_len: 6
+            budget: 8
+            branch_len: 3
             fan_out: uniform
             linear: auto
 
@@ -162,8 +163,8 @@ experiments:
           strategy: saguaro
           max_beam_len: 3
           saguaro:
-            budget: 6
-            branch_len: 6
+            budget: 8
+            branch_len: 3
             fan_out: uniform
             linear: linear
 

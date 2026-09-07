@@ -41,7 +41,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_REPO = "https://github.com/baguioni/specedge"
-DEFAULT_REMOTE_ROOT = "~/specedge"
+DEFAULT_REMOTE_ROOT = "/workspace/specedge"
 DEFAULT_SSH_KEY = "~/.ssh/id_ed25519_server"
 # Identity file used as `ssh -i <path>` for both boxes unless overridden by the
 # config's `ssh_identity` or --ssh-identity.
@@ -79,8 +79,13 @@ def is_local(target: str) -> bool:
 
 
 def ssh_argv(target: str) -> list[str]:
-    """`ssh` + the global identity (unless `target` already sets -i) + target args."""
-    base = ["ssh"]
+    """`ssh` + the global identity (unless `target` already sets -i) + target args.
+
+    `StrictHostKeyChecking=accept-new` lets a first-time box key be saved without
+    a prompt (a *changed* key is still rejected) -- this is a one-shot provisioner
+    run against fresh boxes.
+    """
+    base = ["ssh", "-o", "StrictHostKeyChecking=accept-new"]
     if SSH_IDENTITY and " -i " not in f" {target} ":
         base += ["-i", SSH_IDENTITY]
     return [*base, *shlex.split(str(target))]

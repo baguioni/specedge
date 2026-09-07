@@ -13,8 +13,8 @@ For each experiment in the sweep config it:
      base.exp_name set to the experiment name, base.result_path forced from the
      sweep config, and client.host forced to the server address to dial;
   2. writes the rendered config under paths.rendered_dir;
-  3. runs  src/script/client_host.py --config <rendered>  and waits for it to
-     exit (client_host.py spawns the per-node clients itself);
+  3. runs  script/client_host.sh -f <rendered>  and waits for it to exit
+     (client_host.py, invoked by the wrapper, spawns the per-node clients);
   4. gathers result/<exp_name>/ into paths.collect_to/<exp_name>/ -- and, when
      server.ssh is set, also pulls the server-side result/<exp_name>/server.*
      so `python src/metric/specedge.py -d <folder>` works straight away.
@@ -145,14 +145,22 @@ def select(experiments: list[dict], only: str | None, start_from: str | None) ->
 # running one experiment
 # --------------------------------------------------------------------------- #
 def run_client_host(rendered_rel: str, timeout: float) -> int:
-    """Run src/script/client_host.py for one experiment; return its exit code."""
-    argv = [sys.executable, "src/script/client_host.py", "--config", rendered_rel]
-    info("client_host --config %s", rendered_rel)
+    """Run script/client_host.sh for one experiment; return its exit code.
+
+    The wrapper cd's to the repo root, activates .venv, then execs
+    src/script/client_host.py --config <rendered_rel>.
+    """
+    argv = ["bash", "script/client_host.sh", "-f", rendered_rel]
+    info("client_host.sh -f %s", rendered_rel)
     try:
         return subprocess.run(argv, cwd=REPO, timeout=timeout).returncode  # noqa: S603
     except subprocess.TimeoutExpired:
         warn("client_host exceeded %ss; killing stray client processes", timeout)
-        for pat in ("src/script/client_host.py", "src/script/client.py"):
+        for pat in (
+            "script/client_host.sh",
+            "src/script/client_host.py",
+            "src/script/client.py",
+        ):
             subprocess.run(["pkill", "-f", pat])  # noqa: S603, S607
         return -1
 

@@ -39,7 +39,7 @@ client:
       budget: 12                 # B: total bonus-token guesses across exit leaves
       branch_len: 3              # continuation depth per predicted outcome
       fan_out: geometric         # geometric | uniform
-      init_accept_rate: 0.5      # seed for the geometric fan-out EMA
+      acceptance_rate: 0.5       # assumed draft acceptance rate a_p for the geometric fan-out (fixed, not adapted)
       linear: auto               # auto (from max_branch_width) | "True" | "False"
   max_new_tokens: 64
   max_request_num: -1

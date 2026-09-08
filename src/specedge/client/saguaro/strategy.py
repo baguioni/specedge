@@ -73,7 +73,7 @@ class SaguaroStrategy(OverlapStrategy):
         self._max_n_beams = int(cfg.proactive_max_n_beams)
         # Fixed a_p for the geometric fan-out (Theorem 12), matching the paper
         # and the ssd reference: profiled/known ahead of time, not adapted online.
-        self._accept_rate = float(cfg.saguaro_init_accept_rate)
+        self._acceptance_rate = float(cfg.saguaro_acceptance_rate)
 
         # Give the scratch forest its own budget so branches stay deep enough
         # to leave a CANDIDATE frontier after a splice (see build_speculation_cache).
@@ -100,7 +100,7 @@ class SaguaroStrategy(OverlapStrategy):
             self._engine,
             budget=self._budget,
             max_n_beams=self._max_n_beams,
-            acceptance_rate=self._accept_rate,
+            acceptance_rate=self._acceptance_rate,
             fan_out=self._fan_out,
             linear=self._linear,
         )

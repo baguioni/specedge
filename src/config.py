@@ -129,8 +129,8 @@ class SpecEdgeClientConfig(metaclass=_ConfigMeta):
             os.getenv("SPECEDGE_SAGUARO_BRANCH_LEN", str(cls.proactive_max_beam_len))
         )
         cls.saguaro_fan_out = os.getenv("SPECEDGE_SAGUARO_FAN_OUT", "geometric")
-        cls.saguaro_init_accept_rate = float(
-            os.getenv("SPECEDGE_SAGUARO_INIT_ACCEPT_RATE", "0.5")
+        cls.saguaro_acceptance_rate = float(
+            os.getenv("SPECEDGE_SAGUARO_ACCEPTANCE_RATE", "0.5")
         )
         cls.saguaro_linear = os.getenv("SPECEDGE_SAGUARO_LINEAR", "auto")
 

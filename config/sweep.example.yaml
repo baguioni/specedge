@@ -44,23 +44,6 @@ timeouts:
   run: 5400        # s cap for one client_host.py run
   cooldown: 10     # s to pause between experiments
 
-# --------------------------------------------------------------------------- #
-# Optional: pull result/<exp_name>/server.* back from the server box after each
-# run so `python src/metric/specedge.py -d <folder>` works without a manual
-# copy. Leave server.ssh unset to skip this and fetch server.jsonl yourself.
-# Assumes the running server writes under the same paths.result_path relative
-# to paths.remote_root.
-# --------------------------------------------------------------------------- #
-# server:
-#   ssh: "root@1.2.3.4 -p 22022"   # ssh args as you'd type after `ssh`
-# ssh_identity: "~/.ssh/vast"      # injected as `ssh -i <path>` for the pull
-
-# Deep-merged onto base_config for EVERY experiment, before per-experiment
-# overrides. Put everything that stays constant across the sweep here — the
-# running server is not restarted, so target_model, max_len, max_batch_size,
-# num_clients, batch_type, temperature, seed, dataset / req_offset /
-# sample_req_cnt and client.max_n_beams / max_budget must match the server it
-# was booted with. Only client-side knobs may vary per experiment.
 common:
   base:
     max_len: 2048
@@ -95,11 +78,12 @@ common:
 # client-side knobs (client.proactive.*, client.draft_model, max_new_tokens,
 # max_request_num) so the persistent server stays valid across the sweep.
 experiments:
-  - name: baseline_disabled
+  - name: baseline
     overrides:
       client:
         proactive:
-          type: disabled
+          type: excluded
+          strategy: disabled
 
   - name: proactive
     overrides:
@@ -123,8 +107,8 @@ experiments:
             budget: 8
             branch_len: 3
             fan_out: geometric
-            init_accept_rate: 0.5
-            linear: auto
+            acceptance_rate: 0.5
+            linear: false
 
   - name: saguaro_geom_linear
     overrides:
@@ -137,7 +121,7 @@ experiments:
             budget: 8
             branch_len: 3
             fan_out: geometric
-            init_accept_rate: 0.5
+            acceptance_rate: 0.5
             linear: true
 
   - name: saguaro_uniform
@@ -151,7 +135,7 @@ experiments:
             budget: 8
             branch_len: 3
             fan_out: uniform
-            linear: auto
+            linear: false
 
   - name: saguaro_uniform_linear
     overrides:
@@ -164,4 +148,4 @@ experiments:
             budget: 8
             branch_len: 3
             fan_out: uniform
-            linear: linear
+            linear: true

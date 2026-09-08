@@ -26,8 +26,6 @@ from specedge.client.saguaro.cache import (
 )
 from specedge.client.saguaro.outcomes import predict_outcomes
 
-_ACCEPT_EMA = 0.1
-
 
 def build_speculation_cache(
     tree, forest, exit_nodes, bonus_tokens, device
@@ -73,7 +71,8 @@ class SaguaroStrategy(OverlapStrategy):
         self._branch_len = int(cfg.saguaro_branch_len)
         self._fan_out = cfg.saguaro_fan_out
         self._max_n_beams = int(cfg.proactive_max_n_beams)
-        self._max_depth = max(1, int(cfg.max_beam_len))
+        # Fixed a_p for the geometric fan-out (Theorem 12), matching the paper
+        # and the ssd reference: profiled/known ahead of time, not adapted online.
         self._accept_rate = float(cfg.saguaro_init_accept_rate)
 
         # Give the scratch forest its own budget so branches stay deep enough
@@ -128,8 +127,6 @@ class SaguaroStrategy(OverlapStrategy):
         last_accepted_token_idx: int,
         extra_token_id: torch.Tensor,
     ) -> OverlapResult:
-        self._observe_acceptance(seq_mask)
-
         n_hyp = len(self._cache) if self._cache is not None else 0
         bonus = int(extra_token_id.flatten()[0].item())
         hit = (
@@ -163,10 +160,3 @@ class SaguaroStrategy(OverlapStrategy):
             n_reused=hit.n_tokens,
             n_hypotheses=n_hyp,
         )
-
-    def _observe_acceptance(self, seq_mask: torch.Tensor) -> None:
-        n_accepted = int(seq_mask[int(self._tree.prefix_len) :].sum().item())
-        observed = min(max(n_accepted / self._max_depth, 1e-3), 1.0 - 1e-3)
-        self._accept_rate = (
-            1.0 - _ACCEPT_EMA
-        ) * self._accept_rate + _ACCEPT_EMA * observed

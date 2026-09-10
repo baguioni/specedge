@@ -79,6 +79,7 @@ def main(config_file: str):
     saguaro_fan_out = saguaro_cfg.get("fan_out", "geometric")
     saguaro_acceptance_rate = saguaro_cfg.get("acceptance_rate", 0.5)
     saguaro_linear = saguaro_cfg.get("linear", "auto")
+    saguaro_trace = saguaro_cfg.get("trace", False)
 
     logger.debug("overlap_strategy: %s", overlap_strategy)
     logger.debug("saguaro_budget: %s", saguaro_budget)
@@ -126,6 +127,7 @@ def main(config_file: str):
                 "SPECEDGE_SAGUARO_FAN_OUT": saguaro_fan_out,
                 "SPECEDGE_SAGUARO_ACCEPTANCE_RATE": saguaro_acceptance_rate,
                 "SPECEDGE_SAGUARO_LINEAR": saguaro_linear,
+                "SPECEDGE_SAGUARO_TRACE": saguaro_trace,
                 "SPECEDGE_MAX_NEW_TOKENS": max_new_tokens,
                 "SPECEDGE_MAX_REQUEST_NUM": max_request_num,
                 "SPECEDGE_REQ_OFFSET": req_offset,

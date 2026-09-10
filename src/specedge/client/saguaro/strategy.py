@@ -24,7 +24,10 @@ from specedge.client.saguaro.cache import (
     Outcome,
     SpeculationCache,
 )
-from specedge.client.saguaro.outcomes import predict_outcomes
+from specedge.client.saguaro.outcomes import (
+    OutcomePrediction,
+    predict_outcome_details,
+)
 
 
 def build_speculation_cache(
@@ -87,15 +90,34 @@ class SaguaroStrategy(OverlapStrategy):
             self._linear = str(cfg.saguaro_linear) == "True"
 
         self._cache: SpeculationCache | None = None
+        # Last speculate() round, kept for the tree trace.
+        self._prediction = OutcomePrediction()
+        self._forest = None
 
     @property
     def depth_gain(self) -> int:
         return self._branch_len
 
+    @property
+    def prediction(self) -> OutcomePrediction:
+        """Outcomes predicted by the last ``speculate()``."""
+        return self._prediction
+
+    @property
+    def forest(self):  # -> tuple | None
+        """``draft_forest``'s ``(forest_start, forest_end, root_indices,
+        root_of)`` from the last ``speculate()``, or ``None``."""
+        return self._forest
+
+    @property
+    def cache(self) -> SpeculationCache | None:
+        return self._cache
+
     def speculate(self) -> None:
         self._cache = None
+        self._forest = None
 
-        exit_nodes, bonus_tokens = predict_outcomes(
+        self._prediction = predict_outcome_details(
             self._tree,
             self._engine,
             budget=self._budget,
@@ -104,6 +126,8 @@ class SaguaroStrategy(OverlapStrategy):
             fan_out=self._fan_out,
             linear=self._linear,
         )
+        exit_nodes = self._prediction.exit_nodes
+        bonus_tokens = self._prediction.bonus_tokens
         if not exit_nodes:
             return
 
@@ -116,6 +140,7 @@ class SaguaroStrategy(OverlapStrategy):
         if forest is None:
             return
 
+        self._forest = forest
         self._cache = build_speculation_cache(
             self._tree, forest, exit_nodes, bonus_tokens, self._device
         )

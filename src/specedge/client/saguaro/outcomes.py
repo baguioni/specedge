@@ -15,6 +15,8 @@ token is a parent, so the leaf filter drops it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import torch
 
 
@@ -143,8 +145,41 @@ def outcomes_from_logprobs(
     return out_nodes, out_bonus
 
 
+@dataclass
+class OutcomePrediction:
+    """Everything one ``predict_outcomes`` call decided (kept for tracing).
+
+    Attributes:
+        candidates: candidate exit nodes, in fan-out order.
+        fan: guesses budgeted at each candidate (parallel to ``candidates``).
+        excluded: token already hanging off each candidate, or ``None``.
+        exit_nodes: exit node of each predicted outcome.
+        bonus_tokens: guessed bonus token of each outcome (parallel to
+            ``exit_nodes``).
+        bonus_logprobs: draft log-prob of each guessed bonus token.
+    """
+
+    candidates: list[int] = field(default_factory=list)
+    fan: list[int] = field(default_factory=list)
+    excluded: list = field(default_factory=list)
+    exit_nodes: list[int] = field(default_factory=list)
+    bonus_tokens: list[int] = field(default_factory=list)
+    bonus_logprobs: list[float] = field(default_factory=list)
+
+
+def predict_outcomes(tree, engine, **kwargs) -> tuple[list[int], list[int]]:
+    """One draft forward over the candidate exit nodes -> outcome list.
+
+    Returns ``(exit_nodes, bonus_tokens)`` -- parallel lists, one entry per
+    ``Outcome`` to plant a scratch branch for. Keyword arguments are those of
+    :func:`predict_outcome_details`.
+    """
+    prediction = predict_outcome_details(tree, engine, **kwargs)
+    return prediction.exit_nodes, prediction.bonus_tokens
+
+
 @torch.inference_mode()
-def predict_outcomes(
+def predict_outcome_details(
     tree,
     engine,
     *,
@@ -153,15 +188,11 @@ def predict_outcomes(
     acceptance_rate: float,
     fan_out: str = "geometric",
     linear: bool = False,
-) -> tuple[list[int], list[int]]:
-    """One draft forward over the candidate exit nodes -> outcome list.
-
-    Returns ``(exit_nodes, bonus_tokens)`` -- parallel lists, one entry per
-    ``Outcome`` to plant a scratch branch for.
-    """
+) -> OutcomePrediction:
+    """:func:`predict_outcomes`, returning the full :class:`OutcomePrediction`."""
     exit_idx = select_exit_nodes(tree, max_n_beams, linear)
     if exit_idx.numel() == 0:
-        return [], []
+        return OutcomePrediction()
 
     if not linear:
         # Tree leaves sit at varying depths, so rank them by cumulative log-prob.
@@ -187,5 +218,24 @@ def predict_outcomes(
     )
     logp = torch.log_softmax(logits[0, -exit_idx.numel() :, :], dim=-1)
 
-    excluded = [existing_child_token(tree, int(n)) for n in exit_idx.tolist()]
-    return outcomes_from_logprobs(exit_idx.tolist(), logp, fan, excluded)
+    candidates = exit_idx.tolist()
+    excluded = [existing_child_token(tree, int(n)) for n in candidates]
+    nodes, bonus = outcomes_from_logprobs(candidates, logp, fan, excluded)
+
+    row = {int(n): i for i, n in enumerate(candidates)}
+    bonus_logp = (
+        logp[
+            torch.tensor([row[n] for n in nodes], device=logp.device),
+            torch.tensor(bonus, device=logp.device),
+        ].tolist()
+        if nodes
+        else []
+    )
+    return OutcomePrediction(
+        candidates=[int(n) for n in candidates],
+        fan=[int(f) for f in fan],
+        excluded=excluded,
+        exit_nodes=nodes,
+        bonus_tokens=bonus,
+        bonus_logprobs=bonus_logp,
+    )

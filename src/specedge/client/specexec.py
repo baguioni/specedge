@@ -8,6 +8,7 @@ import util
 from config import SpecEdgeClientConfig as config
 from specedge.client.overlap import OverlapResult, build_overlap_strategy
 from specedge.client.reorder import append_bonus_token, reorder_to_verified_path
+from specedge.client.saguaro.trace import TreeTracer, trace_path
 from specedge.network.grpc import GrpcClientController
 from specedge.tree import Tree
 
@@ -81,6 +82,37 @@ class SpecExecClient:
         self._overlap_active = False
         self._previous_overlap_active = False
 
+        # Per-step tree trace (saguaro only): draft tree, fan-out, verified path.
+        self._tracer = None
+        if config.saguaro_trace:
+            if self._overlap is not None and self._overlap.name == "saguaro":
+                self._tracer = TreeTracer(
+                    tree=self._tree,
+                    strategy=self._overlap,
+                    path=trace_path(
+                        config.result_path, config.exp_name, config.process_name
+                    ),
+                    client_idx=self._client_idx,
+                    run_info={
+                        "draft_model": config.draft_model,
+                        "max_n_beams": self._max_n_beams,
+                        "max_beam_len": self._max_beam_len,
+                        "max_branch_width": self._max_branch_width,
+                        "max_budget": self._max_budget,
+                        "saguaro_budget": config.saguaro_budget,
+                        "saguaro_branch_len": config.saguaro_branch_len,
+                        "saguaro_fan_out": config.saguaro_fan_out,
+                        "saguaro_acceptance_rate": config.saguaro_acceptance_rate,
+                        "saguaro_linear": config.saguaro_linear,
+                    },
+                )
+            else:
+                self._logger.warning(
+                    "saguaro trace needs overlap_strategy=saguaro (got %s); "
+                    "not tracing",
+                    config.overlap_strategy,
+                )
+
     def _verify_configs(self):
         if self._proactive_type not in ["included", "excluded", "disabled"]:
             raise ValueError(f"Invalid proactive_type: {self._proactive_type}")
@@ -96,6 +128,9 @@ class SpecExecClient:
 
         util.set_seed(config.seed)
         step_idx = 0
+
+        if self._tracer is not None:
+            self._tracer.begin_request(req_idx)
 
         # Prefill phase
         self._logger.debug("Prefill phase: req_idx=%d, step_idx=%d", req_idx, step_idx)
@@ -137,8 +172,14 @@ class SpecExecClient:
         )
 
     async def _cycle(self, req_idx: int, step_idx: int, prefill=False) -> torch.Tensor:
+        if self._tracer is not None:
+            self._tracer.begin_step(req_idx, step_idx, prefill)
+
         with util.Timing(device=self._device, mode="sync") as draft_t:
             draft_stats = self._grow_tree(prefill)
+
+        if self._tracer is not None:
+            self._tracer.log_draft()
 
         with util.Timing(device=self._device, mode="sync") as target_t:
             fresh_token_ids, target_stats = await self._validate_tree(req_idx, prefill)
@@ -430,6 +471,8 @@ class SpecExecClient:
 
             if self._overlap is not None:
                 self._overlap.speculate()
+                if self._tracer is not None:
+                    self._tracer.log_speculation()
 
             selection, prefill_cnt = (
                 target_result.result() if target_result.done() else await target_result
@@ -503,6 +546,15 @@ class SpecExecClient:
                     spliced=False, cache_hit=False, n_reused=0, n_hypotheses=0
                 )
                 self._overlap_active = False
+
+            if self._tracer is not None:
+                self._tracer.end_step(
+                    accepted_idx=fresh_token_indices,
+                    accepted_ids=fresh_token_ids,
+                    exit_idx=last_idx,
+                    bonus=int(extra_token_id.flatten()[0].item()),
+                    result=overlap_result,
+                )
 
             fresh_token_ids = torch.cat(
                 [fresh_token_ids, extra_token_id], dim=-1

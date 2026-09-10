@@ -22,7 +22,7 @@ client:
   draft_model: Qwen/Qwen3-1.7B
   dataset: specbench
   reasoning: False
-  sample_req_cnt: 8
+  sample_req_cnt: 480
   req_offset: 0
   max_n_beams: 32
   max_beam_len: 4
@@ -36,11 +36,12 @@ client:
     max_branch_width: 16
     max_budget: 32
     saguaro:                     # only used when strategy == saguaro
-      budget: 12                 # B: total bonus-token guesses across exit leaves
+      budget: 8                 # B: total bonus-token guesses across exit leaves
       branch_len: 3              # continuation depth per predicted outcome
-      fan_out: geometric         # geometric | uniform
+      fan_out: uniform # geometric | uniform
       acceptance_rate: 0.5       # assumed draft acceptance rate a_p for the geometric fan-out (fixed, not adapted)
       linear: auto               # auto (from max_branch_width) | "True" | "False"
+      trace: false               # write <process_name>.tree_trace.jsonl: draft tree, fan-out and verified path per step
   max_new_tokens: 64
   max_request_num: -1
 node:

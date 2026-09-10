@@ -37,8 +37,8 @@ class CachedSpeculation:
         node_indices: sorted absolute indices of every node in the branch.
         n_tokens: ``node_indices.numel()`` -- tokens reused on a cache hit.
         has_frontier: branch contains a POST_CANDIDATE node, i.e. after splicing
-            it leaves a CANDIDATE frontier for the next draft round. Hits on
-            frontier-less branches fall back to the plain reorder path.
+            it leaves a CANDIDATE frontier for the next draft round. On a hit
+            on a frontier-less branch the branch's leaves are re-opened.
     """
 
     root_scratch_idx: int

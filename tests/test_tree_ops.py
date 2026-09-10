@@ -2,7 +2,14 @@
 
 import torch
 
-from specedge.client.reorder import label_forest_roots, splice_scratch_branch
+from specedge.client.overlap import OverlapStrategy
+from specedge.client.reorder import (
+    label_forest_roots,
+    reopen_leaves,
+    splice_scratch_branch,
+)
+from specedge.client.saguaro.cache import CachedSpeculation, Outcome, SpeculationCache
+from specedge.client.saguaro.strategy import SaguaroStrategy
 from specedge.tree import Tree
 
 CPU = torch.device("cpu")
@@ -118,6 +125,61 @@ def test_splice_scratch_branch_reuses_winning_branch():
 
     # KV cache compacted to the accepted prefix
     assert engine.calls == [([0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5])]
+
+
+def test_reopen_leaves_gives_a_frontierless_branch_a_frontier():
+    tree = _fresh_tree()
+    tree.status[7:10] = tree.POST_PROCESSED  # all expanded, children cut
+    seq_mask = torch.zeros(tree.end, dtype=torch.bool)
+    seq_mask[:6] = True
+
+    splice_scratch_branch(tree, _FakeEngine(), CPU, F32, seq_mask, torch.tensor([7, 8, 9]))
+    assert not torch.any(tree.status[: tree.end] == tree.CANDIDATE)
+
+    assert reopen_leaves(tree) == 1
+    # only the leaf (#8, token 32) is re-opened; its ancestors stay settled
+    assert tree.status[8].item() == tree.CANDIDATE.item()
+    assert tree.status[6].item() == tree.PROCESSED.item()
+    assert tree.status[7].item() == tree.PROCESSED.item()
+
+
+def test_reopen_leaves_reopens_a_lone_root():
+    tree = _fresh_tree()
+    tree.status[7] = tree.POST_PROCESSED  # branch is just the guessed token
+    seq_mask = torch.zeros(tree.end, dtype=torch.bool)
+    seq_mask[:6] = True
+
+    splice_scratch_branch(tree, _FakeEngine(), CPU, F32, seq_mask, torch.tensor([7]))
+    assert reopen_leaves(tree) == 1
+    assert int(tree.prefix_len) == 7
+    assert tree.status[6].item() == tree.CANDIDATE.item()  # root, as after a plain reorder
+
+
+def test_saguaro_reuses_a_hit_without_frontier():
+    tree = _fresh_tree()
+    tree.status[7:10] = tree.POST_PROCESSED
+    strategy = SaguaroStrategy.__new__(SaguaroStrategy)
+    OverlapStrategy.__init__(strategy, tree, _FakeEngine(), CPU, F32)
+    strategy._cache = SpeculationCache()
+    strategy._cache.put(
+        Outcome(exit_node_idx=5, bonus=30),
+        CachedSpeculation(
+            root_scratch_idx=7,
+            node_indices=torch.tensor([7, 8, 9]),
+            n_tokens=3,
+            has_frontier=False,
+        ),
+    )
+    seq_mask = torch.zeros(tree.end, dtype=torch.bool)
+    seq_mask[:6] = True
+
+    result = strategy.reconcile(
+        seq_mask=seq_mask, last_accepted_token_idx=5, extra_token_id=torch.tensor([30])
+    )
+
+    assert result.spliced and result.cache_hit and result.n_reused == 3
+    assert tree.tokens[6:9].tolist() == [30, 31, 32]
+    assert tree.status[8].item() == tree.CANDIDATE.item()
 
 
 def test_splice_scratch_branch_matches_contiguous_proactive_range():

@@ -16,6 +16,7 @@ from specedge.client.overlap import OverlapResult, OverlapStrategy
 from specedge.client.proactive import SpecExecProactiveDraft
 from specedge.client.reorder import (
     append_bonus_token,
+    reopen_leaves,
     reorder_to_verified_path,
     splice_scratch_branch,
 )
@@ -46,9 +47,8 @@ def build_speculation_cache(
         exit_nodes, bonus_tokens, root_indices, strict=True
     ):
         nodes = sorted(by_root[int(root_idx)])
-        # A branch is only usable if, after splicing, it leaves a CANDIDATE
-        # frontier for the next _grow_tree to extend -- otherwise the tree
-        # degenerates and the client sends an undersized verification request.
+        # Without a CANDIDATE frontier the next _grow_tree has nothing to
+        # extend after a splice, so reconcile re-opens the branch's leaves.
         has_frontier = any(int(tree.status[n].item()) == post_candidate for n in nodes)
         cache.put(
             Outcome(int(exit_idx), int(bonus)),
@@ -160,11 +160,8 @@ class SaguaroStrategy(OverlapStrategy):
             else None
         )
 
-        # No hit, or a hit whose branch is too short to leave a CANDIDATE
-        # frontier -> fall back to the plain reorder + bonus token (same tokens,
-        # no reuse); splicing it would leave _grow_tree nothing to extend and
-        # the next verification request would be undersized.
-        if hit is None or not hit.has_frontier:
+        # No hit -> plain reorder + bonus token (same tokens, no reuse).
+        if hit is None:
             reorder_to_verified_path(self._tree, self._engine, self._device, seq_mask)
             append_bonus_token(self._tree, extra_token_id, self._device)
             return OverlapResult(
@@ -179,6 +176,11 @@ class SaguaroStrategy(OverlapStrategy):
             seq_mask,
             hit.node_indices,
         )
+        # A branch cut short by the forest budget has every node expanded and
+        # no CANDIDATE left; re-open its leaves so _grow_tree can extend it
+        # (otherwise the next verification request would be undersized).
+        if not hit.has_frontier:
+            reopen_leaves(self._tree)
         return OverlapResult(
             spliced=True,
             cache_hit=True,

@@ -89,20 +89,21 @@ experiments:
     overrides:
       client:
         proactive:
-          type: excluded
+          type: included
           strategy: proactive
           max_n_beams: 32
           max_beam_len: 3
           max_branch_width: 16
-          max_budget: 32
+          max_budget: 64
 
   - name: saguaro_geom
     overrides:
       client:
         proactive:
-          type: excluded
+          type: included
           strategy: saguaro
           max_beam_len: 3
+          max_budget: 64
           saguaro:
             budget: 8
             branch_len: 3
@@ -114,9 +115,10 @@ experiments:
     overrides:
       client:
         proactive:
-          type: excluded
+          type: included
           strategy: saguaro
           max_beam_len: 3
+          max_budget: 64
           saguaro:
             budget: 8
             branch_len: 3
@@ -128,9 +130,10 @@ experiments:
     overrides:
       client:
         proactive:
-          type: excluded
+          type: included
           strategy: saguaro
           max_beam_len: 3
+          max_budget: 64
           saguaro:
             budget: 8
             branch_len: 3
@@ -141,9 +144,10 @@ experiments:
     overrides:
       client:
         proactive:
-          type: excluded
+          type: included
           strategy: saguaro
           max_beam_len: 3
+          max_budget: 64
           saguaro:
             budget: 8
             branch_len: 3

@@ -52,21 +52,27 @@ common:
   server:
     target_model: Qwen/Qwen3-14B
     device: cuda:0
-    temperature: 0.7
+    temperature: 0
     max_batch_size: 1
     num_clients: 1
     batch_type: static
     cache_prefill: true
+  # Small trees, so every node can be followed in render_tree_trace.py.
+  # The main draft tree is sent to the server, which sizes its buffers from
+  # its own config's client.max_budget: keep max_n_beams / max_budget here and
+  # in config/specedge.example.yaml (the server's config) the same. The tree
+  # must be able to reach max_budget within max_beam_len rounds
+  # (width 2, depth 3, 4 beams -> up to 14 nodes >= 8).
   client:
-    draft_model: Qwen/Qwen3-1.7B
+    draft_model: Qwen/Qwen3-0.6B
     dataset: specbench
     reasoning: false
-    sample_req_cnt: 8
+    sample_req_cnt: 32
     req_offset: 0
-    max_n_beams: 32
-    max_beam_len: 4
-    max_branch_width: 16
-    max_budget: 32
+    max_n_beams: 4
+    max_beam_len: 3
+    max_branch_width: 2
+    max_budget: 8
     max_new_tokens: 64
     max_request_num: -1
   node:
@@ -77,6 +83,14 @@ common:
 # `overrides` is a deep-merge patch applied last. Keep the patches to
 # client-side knobs (client.proactive.*, client.draft_model, max_new_tokens,
 # max_request_num) so the persistent server stays valid across the sweep.
+#
+# Every overlap strategy drafts about the same number of scratch nodes while
+# the server verifies, to depth 2, with the same drafter knobs
+# (4 beams, width 2, budget 6):
+#   proactive: one bet on the best leaf              -> 6 nodes
+#   saguaro:   budget 2 guesses x (branch_len 2 + 1) -> ~6 nodes (2 branches of ~3)
+# Saguaro's forest budget is max(proactive.max_budget, budget * (branch_len + 1)),
+# and its guesses are capped at proactive.max_n_beams.
 experiments:
   - name: baseline
     overrides:
@@ -84,6 +98,7 @@ experiments:
         proactive:
           type: excluded
           strategy: disabled
+          trace: true
 
   - name: proactive
     overrides:
@@ -91,10 +106,11 @@ experiments:
         proactive:
           type: included
           strategy: proactive
-          max_n_beams: 32
-          max_beam_len: 3
-          max_branch_width: 16
-          max_budget: 64
+          trace: true
+          max_n_beams: 4
+          max_beam_len: 2
+          max_branch_width: 2
+          max_budget: 6
 
   - name: saguaro_geom
     overrides:
@@ -102,11 +118,14 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          trace: true
+          max_n_beams: 4
+          max_beam_len: 2
+          max_branch_width: 2
+          max_budget: 6
           saguaro:
-            budget: 8
-            branch_len: 3
+            budget: 2
+            branch_len: 2
             fan_out: geometric
             acceptance_rate: 0.5
             exit_mode: leaf
@@ -117,11 +136,14 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          trace: true
+          max_n_beams: 4
+          max_beam_len: 2
+          max_branch_width: 2
+          max_budget: 6
           saguaro:
-            budget: 8
-            branch_len: 3
+            budget: 2
+            branch_len: 2
             fan_out: geometric
             acceptance_rate: 0.5
             exit_mode: trunk
@@ -132,11 +154,14 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          trace: true
+          max_n_beams: 4
+          max_beam_len: 2
+          max_branch_width: 2
+          max_budget: 6
           saguaro:
-            budget: 8
-            branch_len: 3
+            budget: 2
+            branch_len: 2
             fan_out: uniform
             exit_mode: leaf
 
@@ -146,10 +171,13 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          trace: true
+          max_n_beams: 4
+          max_beam_len: 2
+          max_branch_width: 2
+          max_budget: 6
           saguaro:
-            budget: 8
-            branch_len: 3
+            budget: 2
+            branch_len: 2
             fan_out: uniform
             exit_mode: trunk

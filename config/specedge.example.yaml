@@ -11,34 +11,37 @@ server:
   process_name: server
   target_model: Qwen/Qwen3-14B
   device: cuda:0
-  temperature: 0.7
+  temperature: 0
   max_batch_size: 1
-  num_clients: 2
+  num_clients: 1
   batch_type: static
   cache_prefill: true
 client:
   host: 127.0.0.1:8000
   process_name: client
-  draft_model: Qwen/Qwen3-1.7B
+  draft_model: Qwen/Qwen3-0.6B
   dataset: specbench
   reasoning: False
-  sample_req_cnt: 480
+  sample_req_cnt: 32
   req_offset: 0
-  max_n_beams: 32
-  max_beam_len: 4
-  max_branch_width: 16
-  max_budget: 32
+  # Small trees for tracing. The batch server sizes its buffers from
+  # max_n_beams / max_budget here, so they must match the client's
+  # (config/sweep.example.yaml common.client).
+  max_n_beams: 4
+  max_beam_len: 3
+  max_branch_width: 2
+  max_budget: 8
   proactive:
     type: excluded
     strategy: proactive          # proactive | saguaro | disabled
-    max_n_beams: 32
-    max_beam_len: 3
-    max_branch_width: 16
-    max_budget: 32
+    max_n_beams: 4
+    max_beam_len: 2
+    max_branch_width: 2
+    max_budget: 6                # proactive tree: 6 nodes; saguaro forest: ~6 (see saguaro below)
     trace: false                 # any strategy: write <process_name>.tree_trace.jsonl -- draft tree, overlap speculation and verified path per step
     saguaro:                     # only used when strategy == saguaro
-      budget: 8                 # B: total bonus-token guesses across exit leaves
-      branch_len: 3              # continuation depth per predicted outcome
+      budget: 2                 # B: total bonus-token guesses across exit leaves
+      branch_len: 2              # continuation depth per predicted outcome
       fan_out: uniform # geometric | uniform
       acceptance_rate: 0.5       # assumed draft acceptance rate a_p for the geometric fan-out (fixed, not adapted)
       exit_mode: auto             # auto (from max_branch_width) | "leaf" | "trunk"
@@ -47,4 +50,3 @@ client:
 node:
   localhost:
   - device: cuda:0
-  - device: cuda:1

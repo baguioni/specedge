@@ -3,13 +3,16 @@
 Given a fan-out budget ``B``, propose the most likely
 ``(exit_node_idx, bonus_token)`` outcomes to populate the speculation cache.
 
-In *tree* mode the candidate exit points are the draft tree's leaf nodes,
-ranked by cumulative log-prob. In *linear* mode (SpecEdge run with
-``max_branch_width == 1``) the last confirmed token and every node on the chain
-are candidate exit points, which recovers the original per-position
-(accept-depth) enumeration over ``k = 0 .. K``.
+Both modes walk the same draft tree; they differ only in which of its nodes
+count as candidate exit points.
 
-Note that tree mode still omits the zero-accept outcome: the last confirmed
+In *leaf* mode the candidates are the draft tree's leaf nodes, ranked by
+cumulative log-prob. In *trunk* mode (SpecEdge run with
+``max_branch_width == 1``, so the tree is a single trunk) the last confirmed
+token and every node on the trunk are candidate exit points, which recovers
+the original per-position (accept-depth) enumeration over ``k = 0 .. K``.
+
+Note that leaf mode still omits the zero-accept outcome: the last confirmed
 token is a parent, so the leaf filter drops it.
 """
 
@@ -71,11 +74,11 @@ def geometric_fan_out(
     return [max(0, f) for f in fan]
 
 
-def select_exit_nodes(tree, max_n_beams: int, linear: bool) -> torch.Tensor:
+def select_exit_nodes(tree, max_n_beams: int, exit_mode: str) -> torch.Tensor:
     """Candidate exit points where the verified path may leave the draft tree."""
     device = tree.tokens.device
 
-    if linear:
+    if exit_mode == "trunk":
         # ``prefix_len - 1`` holds the last confirmed token, which is the exit
         # point for the zero-accept outcome (``k = 0`` in Kumar et al.) -- the
         # server reports it as ``last_accepted_token_idx = prefix_len - 1``.
@@ -187,18 +190,18 @@ def predict_outcome_details(
     max_n_beams: int,
     acceptance_rate: float,
     fan_out: str = "geometric",
-    linear: bool = False,
+    exit_mode: str = "leaf",
 ) -> OutcomePrediction:
     """:func:`predict_outcomes`, returning the full :class:`OutcomePrediction`."""
-    exit_idx = select_exit_nodes(tree, max_n_beams, linear)
+    exit_idx = select_exit_nodes(tree, max_n_beams, exit_mode)
     if exit_idx.numel() == 0:
         return OutcomePrediction()
 
-    if not linear:
+    if exit_mode != "trunk":
         # Tree leaves sit at varying depths, so rank them by cumulative log-prob.
-        # In linear mode ``exit_idx`` is already in accept-depth order -- which is
+        # In trunk mode ``exit_idx`` is already in accept-depth order -- which is
         # what ``fan`` is indexed by -- so sorting would only re-derive that order
-        # from the (monotonically decreasing) cumulative log-probs along the chain.
+        # from the (monotonically decreasing) cumulative log-probs along the trunk.
         order = torch.argsort(tree.logprobs[exit_idx], descending=True)
         exit_idx = exit_idx[order]
 

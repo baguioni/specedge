@@ -132,7 +132,7 @@ class SpecEdgeClientConfig(metaclass=_ConfigMeta):
         cls.saguaro_acceptance_rate = float(
             os.getenv("SPECEDGE_SAGUARO_ACCEPTANCE_RATE", "0.5")
         )
-        cls.saguaro_linear = os.getenv("SPECEDGE_SAGUARO_LINEAR", "auto")
+        cls.saguaro_exit_mode = os.getenv("SPECEDGE_SAGUARO_EXIT_MODE", "auto")
         cls.saguaro_trace = os.getenv("SPECEDGE_SAGUARO_TRACE", "False") == "True"
 
         # token generation configuration

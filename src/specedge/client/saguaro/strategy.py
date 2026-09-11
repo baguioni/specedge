@@ -84,10 +84,15 @@ class SaguaroStrategy(OverlapStrategy):
             int(cfg.proactive_max_budget), self._budget * (self._branch_len + 1)
         )
 
-        if str(cfg.saguaro_linear) == "auto":
-            self._linear = int(cfg.max_branch_width) == 1
+        if str(cfg.saguaro_exit_mode) == "auto":
+            self._exit_mode = "trunk" if int(cfg.max_branch_width) == 1 else "leaf"
         else:
-            self._linear = str(cfg.saguaro_linear) == "True"
+            self._exit_mode = str(cfg.saguaro_exit_mode)
+            if self._exit_mode not in ("leaf", "trunk"):
+                raise ValueError(
+                    f"saguaro_exit_mode must be 'auto', 'leaf' or 'trunk', "
+                    f"got {self._exit_mode!r}"
+                )
 
         self._cache: SpeculationCache | None = None
         # Last speculate() round, kept for the tree trace.
@@ -124,7 +129,7 @@ class SaguaroStrategy(OverlapStrategy):
             max_n_beams=self._max_n_beams,
             acceptance_rate=self._acceptance_rate,
             fan_out=self._fan_out,
-            linear=self._linear,
+            exit_mode=self._exit_mode,
         )
         exit_nodes = self._prediction.exit_nodes
         bonus_tokens = self._prediction.bonus_tokens

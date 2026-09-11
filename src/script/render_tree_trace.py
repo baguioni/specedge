@@ -640,7 +640,7 @@ function init() {
   const meta = [
     ["draft model", run.draft_model],
     ["draft tree", `beams ${run.max_n_beams} · depth ${run.max_beam_len} · width ${run.max_branch_width} · budget ${run.max_budget}`],
-    ["saguaro", `B ${run.saguaro_budget} · branch ${run.saguaro_branch_len} · ${run.saguaro_fan_out} · a_p ${run.saguaro_acceptance_rate} · linear ${run.saguaro_linear}`],
+    ["saguaro", `B ${run.saguaro_budget} · branch ${run.saguaro_branch_len} · ${run.saguaro_fan_out} · a_p ${run.saguaro_acceptance_rate} · exit ${run.saguaro_exit_mode}`],
     ["requests", String(DATA.requests.length)],
   ];
   $("meta").innerHTML = meta.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v ?? "?")}</dd></div>`).join("");

@@ -428,7 +428,15 @@ class InferenceController:
         drops per-client KV state so the new run's clients start clean. The
         model, CUDA graphs and prefill cache -- all held constant across a
         sweep -- are left untouched.
+
+        Reseeds to ``config.seed`` so every experiment's target-side sampling
+        starts from the same RNG state -- otherwise the shared, never-reset
+        RNG stream drifts across a sweep (each run consumes a different
+        number of sampling calls), making later experiments' generated text
+        diverge from earlier ones for reasons unrelated to their strategy.
         """
+        util.set_seed(config.seed)
+
         if exp_name != self._exp_name:
             log_dir = Path(result_path) / exp_name
             log.configure_logging(log.get_default_log_config(log_dir, "server"))

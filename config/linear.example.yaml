@@ -44,7 +44,7 @@ client:
       branch_len: 4
       fan_out: geometric
       acceptance_rate: 0.5
-      linear: auto               # -> True, since max_branch_width == 1
+      exit_mode: auto             # -> trunk, since max_branch_width == 1
   max_new_tokens: 64
   max_request_num: -1
 node:

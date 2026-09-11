@@ -56,22 +56,22 @@ STRATEGIES = {
     "saguaro_uniform": {
         "SPECEDGE_OVERLAP_STRATEGY": "saguaro",
         "SPECEDGE_SAGUARO_FAN_OUT": "uniform",
-        "SPECEDGE_SAGUARO_LINEAR": "False",
+        "SPECEDGE_SAGUARO_EXIT_MODE": "leaf",
     },
     "saguaro_uniform_linear": {
         "SPECEDGE_OVERLAP_STRATEGY": "saguaro",
         "SPECEDGE_SAGUARO_FAN_OUT": "uniform",
-        "SPECEDGE_SAGUARO_LINEAR": "True",
+        "SPECEDGE_SAGUARO_EXIT_MODE": "trunk",
     },
     "saguaro_geom": {
         "SPECEDGE_OVERLAP_STRATEGY": "saguaro",
         "SPECEDGE_SAGUARO_FAN_OUT": "geometric",
-        "SPECEDGE_SAGUARO_LINEAR": "False",
+        "SPECEDGE_SAGUARO_EXIT_MODE": "leaf",
     },
     "saguaro_geom_linear": {
         "SPECEDGE_OVERLAP_STRATEGY": "saguaro",
         "SPECEDGE_SAGUARO_FAN_OUT": "geometric",
-        "SPECEDGE_SAGUARO_LINEAR": "True",
+        "SPECEDGE_SAGUARO_EXIT_MODE": "trunk",
     },
 }
 

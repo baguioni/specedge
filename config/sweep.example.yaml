@@ -109,7 +109,7 @@ experiments:
             branch_len: 3
             fan_out: geometric
             acceptance_rate: 0.5
-            linear: false
+            exit_mode: leaf
 
   - name: saguaro_geom_linear
     overrides:
@@ -124,7 +124,7 @@ experiments:
             branch_len: 3
             fan_out: geometric
             acceptance_rate: 0.5
-            linear: true
+            exit_mode: trunk
 
   - name: saguaro_uniform
     overrides:
@@ -138,7 +138,7 @@ experiments:
             budget: 8
             branch_len: 3
             fan_out: uniform
-            linear: false
+            exit_mode: leaf
 
   - name: saguaro_uniform_linear
     overrides:
@@ -152,4 +152,4 @@ experiments:
             budget: 8
             branch_len: 3
             fan_out: uniform
-            linear: true
+            exit_mode: trunk

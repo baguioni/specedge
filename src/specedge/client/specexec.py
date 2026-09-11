@@ -103,7 +103,7 @@ class SpecExecClient:
                         "saguaro_branch_len": config.saguaro_branch_len,
                         "saguaro_fan_out": config.saguaro_fan_out,
                         "saguaro_acceptance_rate": config.saguaro_acceptance_rate,
-                        "saguaro_linear": config.saguaro_linear,
+                        "saguaro_exit_mode": config.saguaro_exit_mode,
                     },
                 )
             else:

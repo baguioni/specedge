@@ -40,7 +40,7 @@ client:
       branch_len: 3              # continuation depth per predicted outcome
       fan_out: uniform # geometric | uniform
       acceptance_rate: 0.5       # assumed draft acceptance rate a_p for the geometric fan-out (fixed, not adapted)
-      linear: auto               # auto (from max_branch_width) | "True" | "False"
+      exit_mode: auto             # auto (from max_branch_width) | "leaf" | "trunk"
       trace: false               # write <process_name>.tree_trace.jsonl: draft tree, fan-out and verified path per step
   max_new_tokens: 64
   max_request_num: -1

@@ -54,6 +54,26 @@ def label_forest_roots(
     return root_of
 
 
+def reopen_leaves(tree) -> int:
+    """Mark the spliced branch's PROCESSED leaves as CANDIDATE.
+
+    A scratch branch whose deepest nodes were expanded, but whose children all
+    lost out on the forest budget, leaves no CANDIDATE frontier after a
+    splice. Re-opening its leaves gives the next ``_grow_tree`` something to
+    extend; their draft KV is already cached, so that forward only recomputes
+    it in place to get their logits.
+
+    Call right after :func:`splice_scratch_branch`. Returns the number of
+    re-opened nodes.
+    """
+    start, end = int(tree.prefix_len) - 1, int(tree.end)
+    idx = torch.arange(start, end, device=tree.tokens.device)
+    has_child = torch.isin(idx, tree.parents[start + 1 : end])
+    leaves = idx[~has_child & (tree.status[start:end] == tree.PROCESSED)]
+    tree.status[leaves] = tree.CANDIDATE
+    return int(leaves.numel())
+
+
 def splice_scratch_branch(
     tree,
     engine,

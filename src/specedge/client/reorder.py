@@ -141,5 +141,9 @@ def splice_scratch_branch(
     tree.amask[..., : tree.prefix_len, : tree.prefix_len] = causal
     tree.amask[..., tree.prefix_len : tree.end, : tree.prefix_len] = 1.0
 
-    src = torch.where(seq_mask[: tree.prefix_len])[0]
-    engine.gather(src, torch.arange(src.size(-1), device=device))
+    # Move the draft KV into the same layout: the verified path first, then
+    # the branch, whose KV the scratch forest wrote past the old ``tree.end``.
+    # (Slicing ``seq_mask`` to the new prefix instead drops accepted nodes
+    # at slots past it, and ``gather`` zeroes the branch KV.)
+    src = torch.cat([seq_indices, branch_src])
+    engine.gather(src, torch.arange(src.numel(), device=device))

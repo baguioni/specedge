@@ -123,8 +123,29 @@ def test_splice_scratch_branch_reuses_winning_branch():
     assert tree.tokens[9:].sum().item() == 0
     assert not torch.any(tree.status == tree.POST_CANDIDATE)
 
-    # KV cache compacted to the accepted prefix
-    assert engine.calls == [([0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5])]
+    # KV cache follows the tree: accepted path, then the spliced branch
+    assert engine.calls == [([0, 1, 2, 3, 4, 5, 7, 8, 9], list(range(9)))]
+
+
+def test_splice_moves_kv_of_accepted_nodes_past_the_new_prefix():
+    # Accepting the dead-branch node #6 puts an accepted slot past the new
+    # prefix_len (5); its KV and the branch's must still move with the tree.
+    tree = _fresh_tree()
+    tree.add(
+        token_ids=torch.tensor([50]),
+        token_positions=torch.tensor([5]),
+        parent_indices=torch.tensor([6]),
+        logprobs=torch.tensor([0.0]),
+        token_status=tree.POST_CANDIDATE,
+    )  # scratch root #11 under #6
+    engine = _FakeEngine()
+    seq_mask = torch.zeros(tree.end, dtype=torch.bool)
+    seq_mask[[0, 1, 2, 3, 6]] = True
+
+    splice_scratch_branch(tree, engine, CPU, F32, seq_mask, torch.tensor([11]))
+
+    assert tree.tokens[:6].tolist() == [10, 11, 12, 13, 99, 50]
+    assert engine.calls == [([0, 1, 2, 3, 6, 11], [0, 1, 2, 3, 4, 5])]
 
 
 def test_reopen_leaves_gives_a_frontierless_branch_a_frontier():

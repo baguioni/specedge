@@ -1,4 +1,4 @@
-"""Per-step tree trace for the Saguaro overlap strategy.
+"""Per-step tree trace for every overlap strategy (saguaro, proactive, disabled).
 
 Every decoding step appends one ``"step"`` record to
 ``<result_path>/<exp_name>/<process_name>.tree_trace.jsonl`` holding three
@@ -7,18 +7,23 @@ views of the tree:
 1. ``draft``   -- the committed chain (``chain_len`` tokens, ``chain_new`` of
    them new since the previous step) and the draft tree grown from its last
    token, as sent for verification. ``reused`` marks nodes carried over from
-   the previous step's spliced Saguaro branch.
-2. ``saguaro`` -- the fan-out planted while verification is in flight: the
-   candidate exit nodes with their guess budget, every guessed bonus token,
-   and the scratch forest drafted under the guesses.
+   the previous step's spliced overlap branch.
+2. ``overlap`` -- what the overlap strategy (named by ``strategy``) drafted
+   while verification was in flight: the candidate exit nodes with their
+   guess budget, every guessed bonus token, and the scratch forest drafted
+   under the guesses. Saguaro fans out across many exit nodes; proactive
+   places one bet on its best leaf; ``disabled`` drafts nothing, so its lists
+   are empty.
 3. ``verify``  -- the verified path: the accepted draft tokens, the server's
-   bonus token, and whether a Saguaro branch was spliced into the next step.
+   bonus token, and whether a pre-drafted branch was spliced into the next
+   step.
 
 The file starts with a ``"run"`` record (configuration) and every request
 with a ``"request"`` record (prompt). Tokens are stored as ids;
 ``src/script/render_tree_trace.py`` decodes and draws them. Node ``idx``
 values are tree slots, which the reorder after verification compacts, so they
-are only comparable within one step record.
+are only comparable within one step record. Traces written before other
+strategies were traced call stage 2 ``saguaro``; the renderer reads both.
 """
 
 from __future__ import annotations
@@ -83,11 +88,104 @@ def token_paths(nodes: list[dict], root: int) -> dict[int, tuple[int, ...]]:
     return paths
 
 
+def overlap_section(tree, strategy) -> dict:
+    """Stage 2 of a step record. ``strategy`` is ``None`` when disabled.
+
+    Call right after ``speculate()``: the reconcile step overwrites the scratch
+    forest past ``tree.end``.
+    """
+    name = strategy.name if strategy is not None else "disabled"
+    if name == "saguaro":
+        section = _saguaro_section(tree, strategy)
+    elif name == "proactive":
+        section = _proactive_section(tree, strategy)
+    else:
+        section = {"candidates": [], "bets": [], "forest": []}
+    return {"strategy": name, **section}
+
+
+def _saguaro_section(tree, strategy) -> dict:
+    prediction = strategy.prediction
+    cache = strategy.cache
+    forest = strategy.forest
+    roots = forest[2] if forest is not None else [None] * len(prediction.exit_nodes)
+
+    bets = []
+    for exit_idx, bonus, logprob, root in zip(
+        prediction.exit_nodes,
+        prediction.bonus_tokens,
+        prediction.bonus_logprobs,
+        roots,
+        strict=True,
+    ):
+        spec = cache.get(Outcome(exit_idx, bonus)) if cache is not None else None
+        bets.append(
+            {
+                "exit": exit_idx,
+                "bonus": bonus,
+                "logprob": round(logprob, 4),
+                "root": root,
+                "nodes": spec.node_indices.tolist() if spec is not None else [],
+                "has_frontier": spec is not None and spec.has_frontier,
+            }
+        )
+
+    return {
+        "candidates": [
+            {"node": node, "fan": fan, "excluded": excluded}
+            for node, fan, excluded in zip(
+                prediction.candidates,
+                prediction.fan,
+                prediction.excluded,
+                strict=True,
+            )
+        ],
+        "bets": bets,
+        "forest": snapshot(tree, forest[0], forest[1]) if forest is not None else [],
+    }
+
+
+def _proactive_section(tree, strategy) -> dict:
+    """Proactive drafting as a fan-out of one: every leaf it ranked is a
+    candidate exit node, and the best one gets the single guess."""
+    leaf, bonus, start, end = strategy.pending
+
+    # Leaves have no draft children, so no candidate excludes a token.
+    leaves = strategy.candidates
+    scored = zip(tree.logprobs[leaves].tolist(), leaves.tolist(), strict=True)
+    ranked = [node for _, node in sorted(scored, key=lambda s: -s[0])]
+    chosen = int(leaf) if leaf is not None else None
+    candidates = [
+        {"node": node, "fan": int(node == chosen), "excluded": None} for node in ranked
+    ]
+    if chosen is None:
+        return {"candidates": candidates, "bets": [], "forest": []}
+
+    start, end = int(start), int(end)
+    bet = {
+        "exit": chosen,
+        "bonus": int(bonus),
+        "logprob": round(float(strategy.bonus_logprob), 4),
+        "root": start,
+        "nodes": list(range(start, end)),
+        "has_frontier": bool(
+            (tree.status[start:end] == tree.POST_CANDIDATE).any().item()
+        ),
+    }
+    return {
+        "candidates": candidates,
+        "bets": [bet],
+        "forest": snapshot(tree, start, end),
+    }
+
+
 class TreeTracer:
     """Records the three tree views of every decoding step (see module doc).
 
-    ``SpecExecClient`` calls, per request, ``begin_request`` and then per step
-    ``begin_step`` -> ``log_draft`` -> ``log_speculation`` -> ``end_step``.
+    ``strategy`` is the client's overlap strategy, or ``None`` when overlap
+    drafting is disabled. ``SpecExecClient`` calls, per request,
+    ``begin_request`` and then per step ``begin_step`` -> ``log_draft`` ->
+    ``log_speculation`` -> ``end_step``.
     """
 
     def __init__(
@@ -123,7 +221,7 @@ class TreeTracer:
         root = prefix_len - 1
 
         # Anything already hanging off the root was spliced in from the
-        # previous step's Saguaro branch.
+        # previous step's overlap branch.
         carried = snapshot(tree, root + 1, int(tree.end))
         self._carried = set(token_paths(carried, root).values()) - {()}
 
@@ -151,50 +249,10 @@ class TreeTracer:
         self._record["draft"] = {"root": root, "nodes": nodes}
 
     def log_speculation(self) -> None:
-        """Stage 2. Call right after ``speculate()``: the reconcile step
-        overwrites the scratch forest past ``tree.end``."""
-        prediction = self._strategy.prediction
-        cache = self._strategy.cache
-        forest = self._strategy.forest
-        roots = (
-            forest[2] if forest is not None else [None] * len(prediction.exit_nodes)
-        )
-
-        bets = []
-        for exit_idx, bonus, logprob, root in zip(
-            prediction.exit_nodes,
-            prediction.bonus_tokens,
-            prediction.bonus_logprobs,
-            roots,
-            strict=True,
-        ):
-            spec = cache.get(Outcome(exit_idx, bonus)) if cache is not None else None
-            bets.append(
-                {
-                    "exit": exit_idx,
-                    "bonus": bonus,
-                    "logprob": round(logprob, 4),
-                    "root": root,
-                    "nodes": spec.node_indices.tolist() if spec is not None else [],
-                    "has_frontier": spec is not None and spec.has_frontier,
-                }
-            )
-
-        self._record["saguaro"] = {
-            "candidates": [
-                {"node": node, "fan": fan, "excluded": excluded}
-                for node, fan, excluded in zip(
-                    prediction.candidates,
-                    prediction.fan,
-                    prediction.excluded,
-                    strict=True,
-                )
-            ],
-            "bets": bets,
-            "forest": (
-                snapshot(self._tree, forest[0], forest[1]) if forest is not None else []
-            ),
-        }
+        """Stage 2. Call right after ``speculate()`` (or where it would run,
+        when disabled): the reconcile step overwrites the scratch forest past
+        ``tree.end``."""
+        self._record["overlap"] = overlap_section(self._tree, self._strategy)
 
     def end_step(
         self, *, accepted_idx, accepted_ids, exit_idx: int, bonus: int, result

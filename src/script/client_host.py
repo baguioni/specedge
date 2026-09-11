@@ -79,11 +79,13 @@ def main(config_file: str):
     saguaro_fan_out = saguaro_cfg.get("fan_out", "geometric")
     saguaro_acceptance_rate = saguaro_cfg.get("acceptance_rate", 0.5)
     saguaro_exit_mode = saguaro_cfg.get("exit_mode", "auto")
-    saguaro_trace = saguaro_cfg.get("trace", False)
+    # the tree trace covers every strategy; `saguaro.trace` is its old location
+    trace = proactive_cfg.get("trace", saguaro_cfg.get("trace", False))
 
     logger.debug("overlap_strategy: %s", overlap_strategy)
     logger.debug("saguaro_budget: %s", saguaro_budget)
     logger.debug("saguaro_branch_len: %s", saguaro_branch_len)
+    logger.debug("trace: %s", trace)
 
     # experiment configuration
     max_new_tokens = config["client"]["max_new_tokens"]
@@ -127,7 +129,7 @@ def main(config_file: str):
                 "SPECEDGE_SAGUARO_FAN_OUT": saguaro_fan_out,
                 "SPECEDGE_SAGUARO_ACCEPTANCE_RATE": saguaro_acceptance_rate,
                 "SPECEDGE_SAGUARO_EXIT_MODE": saguaro_exit_mode,
-                "SPECEDGE_SAGUARO_TRACE": saguaro_trace,
+                "SPECEDGE_TRACE": trace,
                 "SPECEDGE_MAX_NEW_TOKENS": max_new_tokens,
                 "SPECEDGE_MAX_REQUEST_NUM": max_request_num,
                 "SPECEDGE_REQ_OFFSET": req_offset,

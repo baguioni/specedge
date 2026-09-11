@@ -1,11 +1,12 @@
-"""Render a Saguaro tree trace (``<process_name>.tree_trace.jsonl``).
+"""Render a SpecEdge tree trace (``<process_name>.tree_trace.jsonl``).
 
 The trace is written by ``specedge.client.saguaro.trace.TreeTracer`` when
-``client.proactive.saguaro.trace: true``. Every decoding step shows three
-views of the tree:
+``client.proactive.trace: true``, for any overlap strategy (saguaro, proactive
+or disabled). Every decoding step shows three views of the tree:
 
   1. the committed chain and the draft tree sent for verification,
-  2. the Saguaro fan-out: guessed bonus tokens and the branches under them,
+  2. the overlap speculation: guessed bonus tokens and the branches under
+     them (empty when overlap drafting is disabled),
   3. the verified chain: accepted draft tokens plus the server's bonus token.
 
 Token ids are decoded with the draft model's tokenizer (taken from the trace,
@@ -49,13 +50,16 @@ def load_trace(path: Path) -> tuple[dict, list[dict]]:
             continue
         kind = rec.get("type")
         if kind == "run":
-            run = rec
+            # Traces from before other strategies were traced are saguaro's.
+            run = {"overlap_strategy": "saguaro", **rec}
         elif kind == "request":
             current = {**rec, "steps": []}
             requests.append(current)
         elif kind == "step":
             if current is None or rec["req_idx"] != current["req_idx"]:
                 raise ValueError(f"{path}:{line_no}: step record before its request")
+            if "overlap" not in rec and "saguaro" in rec:
+                rec["overlap"] = {"strategy": "saguaro", **rec.pop("saguaro")}
             current["steps"].append(rec)
     return run, requests
 
@@ -82,12 +86,15 @@ def annotate(requests: list[dict]) -> None:
 
 
 def outcome(step: dict) -> dict:
-    """Did a Saguaro guess match the verifier's (exit node, bonus token)?"""
+    """Did an overlap guess match the verifier's (exit node, bonus token)?"""
     v = step["verify"]
-    at_exit = [b for b in step["saguaro"]["bets"] if b["exit"] == v["exit"]]
+    bets = step["overlap"]["bets"]
+    at_exit = [b for b in bets if b["exit"] == v["exit"]]
     match = next((b for b in at_exit if b["bonus"] == v["bonus"]), None)
     if v["spliced"]:
         kind = "hit"
+    elif not bets:
+        kind = "none"  # nothing guessed: disabled, or no exit node to bet on
     elif match is not None:
         kind = "partial"  # matched, but the branch had no frontier to extend
     elif at_exit:
@@ -107,11 +114,11 @@ def token_ids(requests: list[dict]) -> set[int]:
         for step in req["steps"]:
             ids.update(step["_tail"])
             ids.update(n["token"] for n in step["draft"]["nodes"])
-            ids.update(n["token"] for n in step["saguaro"]["forest"])
-            ids.update(b["bonus"] for b in step["saguaro"]["bets"])
+            ids.update(n["token"] for n in step["overlap"]["forest"])
+            ids.update(b["bonus"] for b in step["overlap"]["bets"])
             ids.update(
                 c["excluded"]
-                for c in step["saguaro"]["candidates"]
+                for c in step["overlap"]["candidates"]
                 if c["excluded"] is not None
             )
             ids.update(step["verify"]["accepted_tokens"])
@@ -144,7 +151,7 @@ def text_step(step: dict, vocab: dict[int, str]) -> list[str]:
     def tok(token_id: int) -> str:
         return repr(show(vocab[token_id]))
 
-    draft, sag, v = step["draft"], step["saguaro"], step["verify"]
+    draft, sag, v = step["draft"], step["overlap"], step["verify"]
     root = draft["root"]
     nodes = {n["idx"]: n for n in draft["nodes"]}
     n_reused = sum(n["reused"] for n in draft["nodes"])
@@ -180,43 +187,47 @@ def text_step(step: dict, vocab: dict[int, str]) -> list[str]:
     out += ["    " + line for line in ascii_tree(root, children, draft_label)]
 
     # stage 2: the draft tree plus the scratch forest hanging off it
-    forest = {n["idx"]: n for n in sag["forest"]}
-    bets = {b["root"]: b for b in sag["bets"] if b["root"] is not None}
-    fan = {c["node"]: c["fan"] for c in sag["candidates"]}
-    n_exits = sum(1 for f in fan.values() if f > 0)
-    out += [
-        "",
-        f"[2] saguaro fan-out: {len(sag['bets'])} guesses on {n_exits} exit nodes, "
-        f"{len(forest)} scratch tokens",
-    ]
-    ext_children = defaultdict(list)
-    for idx, n in forest.items():
-        ext_children[n["parent"]].append(idx)
-    merged = {
-        k: children.get(k, [])
-        + sorted(
-            ext_children.get(k, []),
-            key=lambda i: (i not in bets, -forest[i]["logprob"], i),
-        )
-        for k in set(children) | set(ext_children)
-    }
+    if sag["strategy"] == "disabled":
+        out += ["", "[2] overlap disabled: nothing drafted during verification"]
+    else:
+        forest = {n["idx"]: n for n in sag["forest"]}
+        bets = {b["root"]: b for b in sag["bets"] if b["root"] is not None}
+        fan = {c["node"]: c["fan"] for c in sag["candidates"]}
+        n_exits = sum(1 for f in fan.values() if f > 0)
+        out += [
+            "",
+            f"[2] {sag['strategy']} speculation: {len(sag['bets'])} guesses on "
+            f"{n_exits} exit nodes, {len(forest)} scratch tokens",
+        ]
+        ext_children = defaultdict(list)
+        for idx, n in forest.items():
+            ext_children[n["parent"]].append(idx)
+        merged = {
+            k: children.get(k, [])
+            + sorted(
+                ext_children.get(k, []),
+                key=lambda i: (i not in bets, -forest[i]["logprob"], i),
+            )
+            for k in set(children) | set(ext_children)
+        }
 
-    def fan_label(idx):
-        if idx in forest:
-            n = forest[idx]
-            if idx in bets:
-                return f"★ {tok(n['token'])}  guess, log p {bets[idx]['logprob']:.2f}"
-            return f"+ {tok(n['token'])}"
-        label = draft_label(idx).removesuffix(" *")
-        return label + (f"  [fan {fan[idx]}]" if idx in fan else "")
+        def fan_label(idx):
+            if idx in forest:
+                n = forest[idx]
+                if idx in bets:
+                    return f"★ {tok(n['token'])}  guess, log p {bets[idx]['logprob']:.2f}"
+                return f"+ {tok(n['token'])}"
+            label = draft_label(idx).removesuffix(" *")
+            return label + (f"  [fan {fan[idx]}]" if idx in fan else "")
 
-    out += ["    " + line for line in ascii_tree(root, merged, fan_label)]
+        out += ["    " + line for line in ascii_tree(root, merged, fan_label)]
 
     # stage 3: the verified chain
     chain = " → ".join(tok(t) for t in v["accepted_tokens"])
     kind = step["_outcome"]["kind"]
     result = {
-        "hit": f"cache hit, {v['n_reused']} tokens reused",
+        "none": "no speculation: nothing was pre-drafted for this step",
+        "hit": f"hit, {v['n_reused']} tokens reused",
         "partial": "guess matched, but its branch has no frontier: not reused",
         "miss_token": "miss: exit covered, bonus not guessed ("
         + ", ".join(tok(t) for t in step["_outcome"]["guesses_at_exit"])
@@ -343,6 +354,8 @@ input[type=range] { flex: 1 1 200px; min-width: 0; accent-color: var(--ext); }
 .pill.hit { color: var(--accept); background: var(--accept-tint); border-color: var(--accept); }
 .pill.partial { color: var(--bonus); background: var(--bonus-tint); border-color: var(--bonus); }
 .pill.miss { color: var(--reject); background: var(--reject-tint); border-color: var(--reject); }
+.pill.none { color: var(--muted); background: var(--surface); border-color: var(--node-line); }
+[hidden] { display: none !important; }
 section.stage { margin-top: 36px; display: flex; flex-direction: column; gap: 10px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 7px; }
@@ -401,6 +414,8 @@ const LABEL_CHARS = 11;
 const label = (s) => { s = show(s); return s.length <= LABEL_CHARS ? s : s.slice(0, LABEL_CHARS - 1) + "…"; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const q = (id) => `<code>${esc(show(tok(id)))}</code>`;
+const WHO = { saguaro: "Saguaro", proactive: "Proactive", disabled: "Overlap" };
+const who = (step) => WHO[step.overlap.strategy] ?? step.overlap.strategy;
 
 function cmp(a, b) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
@@ -496,7 +511,7 @@ function stage1(step) {
     if (n.idx === step.draft.root) continue;
     nodes.set(String(n.idx), {
       parent: String(n.parent), text: tok(n.token),
-      title: nodeTitle(n, n.reused ? "carried over from the previous step's spliced Saguaro branch" : "drafted this step"),
+      title: nodeTitle(n, n.reused ? `carried over from the previous step's spliced ${who(step)} branch` : "drafted this step"),
       cls: n.reused ? "reused" : "", edge: n.reused ? "reused" : "", order: [0, -n.logprob, n.idx],
     });
   }
@@ -504,7 +519,7 @@ function stage1(step) {
 }
 
 function stage2(step) {
-  const sag = step.saguaro;
+  const sag = step.overlap;
   const nodes = new Map();
   const root = String(step.draft.root);
   for (const n of step.draft.nodes) {
@@ -537,7 +552,7 @@ function stage2(step) {
     node.title += `\ncandidate exit node: ${c.fan} guess${c.fan === 1 ? "" : "es"}` +
       (c.excluded !== null ? `, skips ${JSON.stringify(show(tok(c.excluded)))} (already a draft child)` : "");
   }
-  return renderTree(nodes, root, "draft tree with the Saguaro fan-out");
+  return renderTree(nodes, root, `draft tree with the ${who(step)} speculation`);
 }
 
 function stage3(step) {
@@ -554,7 +569,7 @@ function stage3(step) {
   });
   nodes.set("bonus", {
     parent, text: tok(v.bonus), cls: "bonus" + (v.spliced ? " hitroot" : ""), edge: "bonus", order: [0],
-    title: `bonus token sampled by the target (id ${v.bonus})` + (v.spliced ? "\nSaguaro guessed it: its branch is spliced into the next step" : ""),
+    title: `bonus token sampled by the target (id ${v.bonus})` + (v.spliced ? `\n${who(step)} guessed it: its branch is spliced into the next step` : ""),
   });
   return renderTree(nodes, first ?? root, "verified chain", origin);
 }
@@ -563,7 +578,8 @@ function outcomeText(step) {
   const v = step.verify, o = step._outcome;
   const exit = v.exit === step.draft.root ? "the root (nothing accepted)" : `#${v.exit}`;
   switch (o.kind) {
-    case "hit": return ["hit", `cache hit · ${v.n_reused} reused`, `Saguaro guessed ${q(v.bonus)} after ${exit}. Its ${v.n_reused}-token branch is spliced in, so the next step's draft tree starts from it (blue in stage 1 of step ${step.step_idx + 1}).`];
+    case "none": return ["none", "no speculation", (step.overlap.strategy === "disabled" ? "Overlap drafting is disabled, so nothing was pre-drafted for this step." : `${who(step)} made no guesses this step.`) + ` The target sampled ${q(v.bonus)} after ${exit}.`];
+    case "hit": return ["hit", `hit · ${v.n_reused} reused`, `${who(step)} guessed ${q(v.bonus)} after ${exit}. Its ${v.n_reused}-token branch is spliced in, so the next step's draft tree starts from it (blue in stage 1 of step ${step.step_idx + 1}).`];
     case "partial": return ["partial", "hit · not reused", `A guess matched (${q(v.bonus)} after ${exit}), but its branch has no open frontier, so the client falls back to a plain reorder.`];
     case "miss_token": return ["miss", "miss · wrong token", `The exit ${exit} had guesses (${o.guesses_at_exit.map(q).join(", ")}), but the target sampled ${q(v.bonus)}.`];
     default: return ["miss", "miss · wrong exit", `No guess sat at the exit ${exit}. The target sampled ${q(v.bonus)}.`];
@@ -601,7 +617,7 @@ function drawRequest() {
   }).join("");
   $("gen").textContent = req._generated_text ?? req._generated.map(tok).join("");
   const hits = req.steps.filter((s) => s._outcome.kind === "hit").length;
-  $("reqnote").textContent = `${req.steps.length} steps · ${req._generated.length} tokens generated · ${hits} cache hits`;
+  $("reqnote").textContent = `${req.steps.length} steps · ${req._generated.length} tokens generated · ${hits} splices`;
 }
 
 let drawnReq = -1;
@@ -624,11 +640,16 @@ function draw() {
     (step.chain_new.length ? ` New in the chain since the last step: ${step.chain_new.map(q).join(" ")}.` : "");
   $("s1").innerHTML = stage1(step);
 
-  const sag = step.saguaro;
+  const sag = step.overlap;
   const funded = sag.candidates.filter((c) => c.fan > 0).length;
-  $("s2lede").innerHTML = sag.bets.length
-    ? `${sag.bets.length} guessed bonus tokens on ${funded} of ${sag.candidates.length} candidate exit nodes, ${sag.forest.length} scratch tokens drafted while the target verified.`
-    : "Saguaro made no guesses this step.";
+  const title = { saguaro: "Saguaro fan-out", proactive: "Proactive draft", disabled: "Overlap drafting (disabled)" };
+  $("s2title").textContent = "2 · " + (title[sag.strategy] ?? `${sag.strategy} speculation`);
+  $("s2legend").hidden = !sag.bets.length;
+  $("s2lede").innerHTML = !sag.bets.length
+    ? (sag.strategy === "disabled" ? "Overlap drafting is disabled: the edge drafts nothing while the target verifies." : `${who(step)} made no guesses this step.`)
+    : sag.strategy === "proactive"
+      ? `One guessed bonus token after the best of ${sag.candidates.length} leaves, ${sag.forest.length} scratch tokens drafted while the target verified.`
+      : `${sag.bets.length} guessed bonus tokens on ${funded} of ${sag.candidates.length} candidate exit nodes, ${sag.forest.length} scratch tokens drafted while the target verified.`;
   $("s2").innerHTML = sag.bets.length ? stage2(step) : `<p class="empty">Nothing to show.</p>`;
 
   $("s3lede").innerHTML = sentence;
@@ -637,10 +658,13 @@ function draw() {
 
 function init() {
   const run = DATA.run;
+  const strategy = run.overlap_strategy ?? "saguaro";
   const meta = [
     ["draft model", run.draft_model],
     ["draft tree", `beams ${run.max_n_beams} · depth ${run.max_beam_len} · width ${run.max_branch_width} · budget ${run.max_budget}`],
-    ["saguaro", `B ${run.saguaro_budget} · branch ${run.saguaro_branch_len} · ${run.saguaro_fan_out} · a_p ${run.saguaro_acceptance_rate} · exit ${run.saguaro_exit_mode}`],
+    ["overlap", strategy],
+    ...(strategy === "saguaro" ? [["saguaro", `B ${run.saguaro_budget} · branch ${run.saguaro_branch_len} · ${run.saguaro_fan_out} · a_p ${run.saguaro_acceptance_rate} · exit ${run.saguaro_exit_mode}`]] : []),
+    ...(strategy === "proactive" ? [["proactive draft", `${run.proactive_type} · beams ${run.proactive_max_n_beams} · depth ${run.proactive_max_beam_len} · width ${run.proactive_max_branch_width} · budget ${run.proactive_max_budget}`]] : []),
     ["requests", String(DATA.requests.length)],
   ];
   $("meta").innerHTML = meta.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v ?? "?")}</dd></div>`).join("");
@@ -662,13 +686,13 @@ function init() {
 init();
 """
 
-PAGE = """<title>Saguaro Tree Trace</title>
+PAGE = """<title>SpecEdge Tree Trace</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>__CSS__</style>
 <div class="wrap">
-  <span class="eyebrow">SpecEdge · Saguaro tree trace</span>
+  <span class="eyebrow">SpecEdge · tree trace</span>
   <h1>__TITLE__</h1>
   <dl class="meta" id="meta"></dl>
 
@@ -680,20 +704,20 @@ PAGE = """<title>Saguaro Tree Trace</title>
     <span id="steplabel" class="mono"></span>
   </nav>
   <div class="strip" id="strip"></div>
-  <p class="strip-note"><span id="reqnote"></span> · each cell is one step: tokens gained, green on a cache hit. ← → keys step through.</p>
+  <p class="strip-note"><span id="reqnote"></span> · each cell is one step: tokens gained, green when a pre-drafted branch was spliced. ← → keys step through.</p>
   <div class="summary" id="summary"></div>
 
   <section class="stage">
     <h2>1 · Chain and draft tree</h2>
     <p class="lede" id="s1lede"></p>
-    <div class="legend"><span><i class="sw chain"></i>committed chain</span><span><i class="sw"></i>drafted this step</span><span><i class="sw reused"></i>reused from last step's Saguaro branch</span></div>
+    <div class="legend"><span><i class="sw chain"></i>committed chain</span><span><i class="sw"></i>drafted this step</span><span><i class="sw reused"></i>reused from last step's spliced branch</span></div>
     <div class="scroll tall" id="s1"></div>
   </section>
 
   <section class="stage">
-    <h2>2 · Saguaro fan-out</h2>
+    <h2 id="s2title">2 · Overlap speculation</h2>
     <p class="lede" id="s2lede"></p>
-    <div class="legend"><span><i class="sw badge"></i>guesses at a candidate exit node</span><span><i class="sw guess"></i>guessed bonus token</span><span><i class="sw ext"></i>scratch continuation</span><span><i class="sw hitroot"></i>guess the verifier confirmed</span></div>
+    <div class="legend" id="s2legend"><span><i class="sw badge"></i>guesses at a candidate exit node</span><span><i class="sw guess"></i>guessed bonus token</span><span><i class="sw ext"></i>scratch continuation</span><span><i class="sw hitroot"></i>guess the verifier confirmed</span></div>
     <div class="scroll tall" id="s2"></div>
   </section>
 

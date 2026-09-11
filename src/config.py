@@ -133,7 +133,12 @@ class SpecEdgeClientConfig(metaclass=_ConfigMeta):
             os.getenv("SPECEDGE_SAGUARO_ACCEPTANCE_RATE", "0.5")
         )
         cls.saguaro_exit_mode = os.getenv("SPECEDGE_SAGUARO_EXIT_MODE", "auto")
-        cls.saguaro_trace = os.getenv("SPECEDGE_SAGUARO_TRACE", "False") == "True"
+        # per-step tree trace, for any overlap strategy; SPECEDGE_SAGUARO_TRACE
+        # is its old name, still honored for launch scripts that set it
+        cls.trace = (
+            os.getenv("SPECEDGE_TRACE", os.getenv("SPECEDGE_SAGUARO_TRACE", "False"))
+            == "True"
+        )
 
         # token generation configuration
         cls.max_new_tokens = int(cls._from_env("SPECEDGE_MAX_NEW_TOKENS"))

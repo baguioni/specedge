@@ -82,36 +82,38 @@ class SpecExecClient:
         self._overlap_active = False
         self._previous_overlap_active = False
 
-        # Per-step tree trace (saguaro only): draft tree, fan-out, verified path.
+        # Per-step tree trace (any strategy): draft tree, overlap speculation,
+        # verified path.
         self._tracer = None
-        if config.saguaro_trace:
-            if self._overlap is not None and self._overlap.name == "saguaro":
-                self._tracer = TreeTracer(
-                    tree=self._tree,
-                    strategy=self._overlap,
-                    path=trace_path(
-                        config.result_path, config.exp_name, config.process_name
+        if config.trace:
+            self._tracer = TreeTracer(
+                tree=self._tree,
+                strategy=self._overlap,
+                path=trace_path(
+                    config.result_path, config.exp_name, config.process_name
+                ),
+                client_idx=self._client_idx,
+                run_info={
+                    "overlap_strategy": (
+                        self._overlap.name if self._overlap is not None else "disabled"
                     ),
-                    client_idx=self._client_idx,
-                    run_info={
-                        "draft_model": config.draft_model,
-                        "max_n_beams": self._max_n_beams,
-                        "max_beam_len": self._max_beam_len,
-                        "max_branch_width": self._max_branch_width,
-                        "max_budget": self._max_budget,
-                        "saguaro_budget": config.saguaro_budget,
-                        "saguaro_branch_len": config.saguaro_branch_len,
-                        "saguaro_fan_out": config.saguaro_fan_out,
-                        "saguaro_acceptance_rate": config.saguaro_acceptance_rate,
-                        "saguaro_exit_mode": config.saguaro_exit_mode,
-                    },
-                )
-            else:
-                self._logger.warning(
-                    "saguaro trace needs overlap_strategy=saguaro (got %s); "
-                    "not tracing",
-                    config.overlap_strategy,
-                )
+                    "draft_model": config.draft_model,
+                    "max_n_beams": self._max_n_beams,
+                    "max_beam_len": self._max_beam_len,
+                    "max_branch_width": self._max_branch_width,
+                    "max_budget": self._max_budget,
+                    "proactive_type": self._proactive_type,
+                    "proactive_max_n_beams": config.proactive_max_n_beams,
+                    "proactive_max_beam_len": config.proactive_max_beam_len,
+                    "proactive_max_branch_width": config.proactive_max_branch_width,
+                    "proactive_max_budget": config.proactive_max_budget,
+                    "saguaro_budget": config.saguaro_budget,
+                    "saguaro_branch_len": config.saguaro_branch_len,
+                    "saguaro_fan_out": config.saguaro_fan_out,
+                    "saguaro_acceptance_rate": config.saguaro_acceptance_rate,
+                    "saguaro_exit_mode": config.saguaro_exit_mode,
+                },
+            )
 
     def _verify_configs(self):
         if self._proactive_type not in ["included", "excluded", "disabled"]:
@@ -486,8 +488,8 @@ class SpecExecClient:
 
             if self._overlap is not None:
                 self._overlap.speculate()
-                if self._tracer is not None:
-                    self._tracer.log_speculation()
+            if self._tracer is not None:
+                self._tracer.log_speculation()
 
             selection, prefill_cnt = (
                 target_result.result() if target_result.done() else await target_result

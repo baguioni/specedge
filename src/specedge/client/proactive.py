@@ -33,11 +33,19 @@ class SpecExecProactiveDraft:
         # FIXME: remove hard-coded value
         self._max_len = max_len
 
+        # What the last draft() chose from, kept for the tree trace: the leaves
+        # it ranked and the draft log-prob of the bonus token it bet on.
+        self.last_candidates = torch.empty(0, dtype=torch.long, device=self._device)
+        self.last_bonus_logprob = None
+
     @torch.inference_mode()
     def draft(self):
         """
         Expand tree from the best bonus token candidate.
         """
+
+        self.last_candidates = torch.empty(0, dtype=torch.long, device=self._device)
+        self.last_bonus_logprob = None
 
         best_token_idx, best_token_id = self._get_best_bonus_token_candidate()
 
@@ -179,6 +187,7 @@ class SpecExecProactiveDraft:
 
         self._logger.debug("Getting best bonus token candidate...")
         input_indices = self._get_leaves_nodes()
+        self.last_candidates = input_indices
 
         if input_indices.numel() == 0:
             self._logger.debug("No candidate token found.")
@@ -216,6 +225,7 @@ class SpecExecProactiveDraft:
         _, best_beam_idx = accumulate_logprobs.max(dim=0)
         best_token_idx = input_indices[best_beam_idx // TOP_K_TOKENS]
         best_token_id = logprob_ids[best_beam_idx]
+        self.last_bonus_logprob = logprobs.values.flatten()[best_beam_idx]
 
         return best_token_idx, best_token_id
 
@@ -379,6 +389,22 @@ class ProactiveStrategy(OverlapStrategy):
     @property
     def depth_gain(self) -> int:
         return self._depth_gain
+
+    @property
+    def pending(self):  # -> tuple
+        """``(leaf_idx, bonus_token, scratch_start, scratch_end)`` from the
+        last ``speculate()``; all ``None`` when nothing was drafted."""
+        return self._pending
+
+    @property
+    def candidates(self) -> torch.Tensor:
+        """Leaves the last ``speculate()`` chose its bet from."""
+        return self._pd.last_candidates
+
+    @property
+    def bonus_logprob(self):  # -> torch.Tensor | None
+        """Draft log-prob of the bonus token the last ``speculate()`` bet on."""
+        return self._pd.last_bonus_logprob
 
     def speculate(self) -> None:
         self._pending = self._pd.draft()

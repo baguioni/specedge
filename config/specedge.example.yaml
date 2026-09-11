@@ -24,24 +24,24 @@ client:
   reasoning: False
   sample_req_cnt: 480
   req_offset: 0
-  max_n_beams: 32
-  max_beam_len: 4
-  max_branch_width: 16
-  max_budget: 32
+  max_n_beams: 4
+  max_beam_len: 2
+  max_branch_width: 4
+  max_budget: 8
   proactive:
     type: excluded
     strategy: proactive          # proactive | saguaro | disabled
-    max_n_beams: 32
-    max_beam_len: 3
-    max_branch_width: 16
-    max_budget: 32
+    max_n_beams: 4
+    max_beam_len: 2
+    max_branch_width: 4
+    max_budget: 8
     saguaro:                     # only used when strategy == saguaro
-      budget: 8                 # B: total bonus-token guesses across exit leaves
-      branch_len: 3              # continuation depth per predicted outcome
+      budget: 2                 # B: total bonus-token guesses across exit leaves
+      branch_len: 2              # continuation depth per predicted outcome
       fan_out: uniform # geometric | uniform
       acceptance_rate: 0.5       # assumed draft acceptance rate a_p for the geometric fan-out (fixed, not adapted)
       exit_mode: auto             # auto (from max_branch_width) | "leaf" | "trunk"
-      trace: false               # write <process_name>.tree_trace.jsonl: draft tree, fan-out and verified path per step
+      trace: true                # write <process_name>.tree_trace.jsonl: draft tree, fan-out and verified path per step
   max_new_tokens: 64
   max_request_num: -1
 node:

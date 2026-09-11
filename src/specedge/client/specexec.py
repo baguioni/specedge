@@ -218,7 +218,15 @@ class SpecExecClient:
         # draft forward times
         draft_forward_times = []
 
-        max_beam_len = self._max_beam_len
+        # depth_gain rounds were (assumed) already grown by the overlap during
+        # the server round trip -- skip redrafting them, but only as long as
+        # that assumption holds. A cache hit that spliced in just one of many
+        # predicted branches can leave a frontier far narrower than a normal
+        # round would have produced, so the discount is a target to skip past
+        # when possible, not a hard cap: `hard_ceiling` (the full, undiscounted
+        # round count) is the real limit, and the loop below only honors the
+        # discount once the tree has actually reached max_budget.
+        max_beam_len = hard_ceiling = self._max_beam_len
         if (
             self._proactive_type == "included"
             and self._overlap_active
@@ -227,10 +235,17 @@ class SpecExecClient:
             max_beam_len = max(0, self._max_beam_len - self._overlap.depth_gain)
 
         if torch.where(self._tree.status == self._tree.CANDIDATE)[0].numel() == 0:
-            max_beam_len = 0
+            max_beam_len = hard_ceiling = 0
 
-        for cnt in range(max_beam_len):
-            self._logger.debug("Growing tree: %d / %d", cnt, max_beam_len)
+        for cnt in range(hard_ceiling):
+            if (
+                cnt >= max_beam_len
+                and self._tree.end - self._tree.prefix_len >= self._max_budget
+            ):
+                self._logger.debug("Discounted rounds spent and budget met; stopping")
+                break
+
+            self._logger.debug("Growing tree: %d / %d", cnt, hard_ceiling)
 
             logits, beam_indices, beam_positions, beam_scores, draft_forward_t = (
                 self._process_candidates(prefill)

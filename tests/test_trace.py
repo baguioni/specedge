@@ -373,6 +373,16 @@ def test_proactive_logs_its_single_bet_and_the_splice(tmp_path):
     assert reused == {70: False, 80: True, 81: True}
 
 
+def test_proactive_caps_leaves_to_max_n_beams_as_tree_slots():
+    tree = Tree(_t([[1, 2, 3]]), CPU, F32, max_len=32)
+    _add(tree, [10, 11, 12, 13], [2, 2, 2, 2], [-0.9, -0.1, -0.5, -0.3])  # #3..#6
+    strategy = _proactive(tree, _ScriptedEngine([]), beam_len=1)
+    strategy._pd._max_n_beams = 2
+
+    leaves = strategy._pd._get_leaves_nodes()
+    assert sorted(leaves.tolist()) == [4, 6]  # the two best leaves, not offsets 1, 3
+
+
 def test_proactive_without_leaves_logs_no_bet(tmp_path):
     tree = Tree(_t([[1, 2]]), CPU, F32, max_len=16)
     strategy = _proactive(tree, _ScriptedEngine([]), beam_len=1)

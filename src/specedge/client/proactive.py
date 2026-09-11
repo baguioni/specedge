@@ -247,7 +247,10 @@ class SpecExecProactiveDraft:
         )
 
         if candidate_leaf_mask.sum() > self._max_n_beams:
-            candidate_leaf_indices = torch.where(candidate_leaf_mask)[0]
+            # the mask covers [prefix_len, end), so offset back to tree slots
+            candidate_leaf_indices = (
+                torch.where(candidate_leaf_mask)[0] + self._tree.prefix_len
+            )
             topk_indices = (
                 self._tree.logprobs[candidate_leaf_indices]
                 .topk(k=self._max_n_beams, sorted=False)

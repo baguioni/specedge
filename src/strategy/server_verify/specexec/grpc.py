@@ -11,6 +11,7 @@ from rich.progress import track
 import log
 import util
 from config import SpecEdgeBatchServerConfig as config
+from model.cache import HybridCache
 from specedge.engine.graph import BatchGraphEngine
 from specedge_grpc import specedge_pb2, specedge_pb2_grpc
 
@@ -262,9 +263,15 @@ class InferenceController:
             max_n_beams=self._max_n_beams,
         )
 
+        # Hybrid models (Qwen3.5) keep per-client cache snapshots instead of
+        # full-size K/V buffers: their linear-attention layers carry a
+        # recurrent state that the K/V copy below would drop.
+        self._hybrid = isinstance(self._engine._past_key_values, HybridCache)
+        self._client_states: dict[int, dict] = {}
+
         self.k_cache = torch.zeros(
             (
-                self._model.config.num_hidden_layers,
+                0 if self._hybrid else self._model.config.num_hidden_layers,
                 self._num_clients,
                 self._model.config.num_key_value_heads,
                 self._max_len,
@@ -360,6 +367,12 @@ class InferenceController:
             cache_dir.mkdir(parents=True, exist_ok=True)
 
         for req_idx in track(req_indices, description="Prefilling cache"):
+            if self._hybrid:
+                kv_prefill_offloading[req_idx] = self._cache_prefill_hybrid(
+                    dataset[req_idx], cache_dir / f"{req_idx}_hybrid_state.pt"
+                )
+                continue
+
             k_cache_file_name = cache_dir / f"{req_idx}_key_cache.pt"
             v_cache_file_name = cache_dir / f"{req_idx}_value_cache.pt"
 
@@ -421,6 +434,33 @@ class InferenceController:
 
         return kv_prefill_offloading
 
+    def _cache_prefill_hybrid(self, prompt: str, file_name: Path) -> dict:
+        if file_name.exists():
+            return torch.load(file_name, map_location="cpu")
+
+        input_ids = self._tokenizer.encode(prompt, return_tensors="pt").to(
+            self._device
+        )[..., :-1]
+        position_ids = self._predefined_position_ids[:, : input_ids.size(1)]
+        attention_mask = self._predefined_attention_mask[
+            :, :, : input_ids.size(1), : self._max_len
+        ]
+
+        self._engine._past_key_values.clear()
+        self._engine.prefill(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            batch_idx=0,
+            cache_seq_indices=position_ids[0],
+            attention_mask=attention_mask,
+        )
+        snap = {
+            k: v.cpu() if isinstance(v, torch.Tensor) else v
+            for k, v in self._engine._past_key_values.snapshot(0).items()
+        }
+        torch.save(snap, file_name)
+        return snap
+
     def _begin_experiment(self, exp_name: str, result_path: str) -> None:
         """Serve the next benchmark run without a restart.
 
@@ -452,6 +492,7 @@ class InferenceController:
         self._engine._past_key_values.clear()
         self.k_cache.zero_()
         self.v_cache.zero_()
+        self._client_states.clear()
         self._iter_idx.zero_()
         self._request_batches.clear()
 
@@ -571,7 +612,11 @@ class InferenceController:
                 )
             )
 
-            if not req.prefill:
+            if not req.prefill and self._hybrid:
+                self._engine._past_key_values.restore(
+                    batch_idx, self._client_states[client_idx]
+                )
+            elif not req.prefill:
                 self._engine._past_key_values.k_cache[:, batch_idx, ...].copy_(
                     self.k_cache[:, req.client_idx, ...]
                 )
@@ -580,7 +625,13 @@ class InferenceController:
                 )
 
         for batch_idx, req_idx in prefill_indices:
-            if config.cache_prefill:
+            if config.cache_prefill and self._hybrid:
+                snap = {
+                    k: v.to(self._device) if isinstance(v, torch.Tensor) else v
+                    for k, v in self._kv_prefill_offloading[req_idx].items()
+                }
+                self._engine._past_key_values.restore(batch_idx, snap)
+            elif config.cache_prefill:
                 # Load from cache
                 k_cache, v_cache = self._kv_prefill_offloading[req_idx]
 
@@ -704,6 +755,11 @@ class InferenceController:
                 b_src_indices.size(-1), dtype=torch.long, device=self._device
             )
             self._engine.gather(batch_idx, b_src_indices, b_dest_indices)
+            if self._hybrid:
+                self._client_states[int(client_idx)] = (
+                    self._engine._past_key_values.snapshot(batch_idx)
+                )
+                continue
             self.k_cache[:, client_idx, ...].copy_(
                 self._engine._past_key_values.k_cache[:, batch_idx, ...]
             )

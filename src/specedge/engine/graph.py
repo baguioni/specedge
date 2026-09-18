@@ -23,7 +23,7 @@ class GraphEngine:
         self._dtype = self._model.dtype
         self._config = self._model.config
 
-        self._past_key_values = KVCache(
+        self._past_key_values = getattr(model, "cache_cls", KVCache)(
             config=self._config,
             batch_size=1,
             max_n_beams=self._max_n_beams,
@@ -223,7 +223,7 @@ class BatchGraphEngine:
         self._dtype = self._model.dtype
         self._config = self._model.config
 
-        self._past_key_values = KVCache(
+        self._past_key_values = getattr(model, "cache_cls", KVCache)(
             config=self._config,
             max_n_beams=self._max_n_beams,
             max_len=self.max_len,

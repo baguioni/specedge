@@ -12,6 +12,7 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 
 from model.llama import LlamaForCausalLM
 from model.qwen3 import Qwen3ForCausalLM
+from model.qwen3_5 import Qwen3_5ForCausalLM
 
 
 def parse_config_version(version: str) -> tuple[str, str]:
@@ -45,6 +46,10 @@ def load_model(name: str, device: torch.device, dtype: torch.dtype):
 def load_graph_model(name: str, device: torch.device, dtype: torch.dtype):
     if "llama" in name.lower() or "vicuna" in name.lower():
         model = LlamaForCausalLM.from_pretrained(
+            name, torch_dtype=dtype, device_map=device
+        )
+    elif "qwen3.5" in name.lower() or "qwen3_5" in name.lower():
+        model = Qwen3_5ForCausalLM.from_pretrained(
             name, torch_dtype=dtype, device_map=device
         )
     elif "qwen3" in name.lower():

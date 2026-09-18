@@ -22,12 +22,12 @@ client:
   draft_model: Qwen/Qwen3-1.7B
   dataset: specbench
   reasoning: False
-  sample_req_cnt: 480
+  sample_req_cnt: 8
   req_offset: 0
-  max_n_beams: 4
-  max_beam_len: 2
-  max_branch_width: 4
-  max_budget: 8
+  max_n_beams: 32
+  max_beam_len: 4
+  max_branch_width: 16
+  max_budget: 64
   proactive:
     type: excluded
     strategy: proactive          # proactive | saguaro | disabled

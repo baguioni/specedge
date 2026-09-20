@@ -63,10 +63,10 @@ common:
     reasoning: false
     sample_req_cnt: 8
     req_offset: 0
-    max_n_beams: 4
-    max_beam_len: 2
-    max_branch_width: 4
-    max_budget: 8
+    max_n_beams: 32
+    max_beam_len: 4
+    max_branch_width: 16
+    max_budget: 32
     max_new_tokens: 64
     max_request_num: -1
   node:
@@ -91,10 +91,10 @@ experiments:
         proactive:
           type: included
           strategy: proactive
-          max_n_beams: 4
-          max_beam_len: 2
-          max_branch_width: 4
-          max_budget: 8
+          max_n_beams: 32
+          max_beam_len: 3
+          max_branch_width: 16
+          max_budget: 64
 
   - name: saguaro_geom
     overrides:
@@ -102,15 +102,15 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 2
-          max_budget: 8
+          max_beam_len: 3
+          max_budget: 64
           saguaro:
-            budget: 2
-            branch_len: 2
+            budget: 8
+            branch_len: 3
             fan_out: geometric
             acceptance_rate: 0.5
             exit_mode: leaf
-            trace: true
+            trace: false
 
   - name: saguaro_geom_linear
     overrides:
@@ -118,15 +118,15 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 2
-          max_budget: 8
+          max_beam_len: 3
+          max_budget: 64
           saguaro:
-            budget: 2
-            branch_len: 2
+            budget: 8
+            branch_len: 3
             fan_out: geometric
             acceptance_rate: 0.5
             exit_mode: trunk
-            trace: true
+            trace: false
 
   - name: saguaro_uniform
     overrides:
@@ -134,14 +134,14 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 2
-          max_budget: 8
+          max_beam_len: 3
+          max_budget: 64
           saguaro:
-            budget: 2
-            branch_len: 2
+            budget: 8
+            branch_len: 3
             fan_out: uniform
             exit_mode: leaf
-            trace: true
+            trace: false
 
   - name: saguaro_uniform_linear
     overrides:
@@ -149,11 +149,11 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 2
-          max_budget: 8
+          max_beam_len: 3
+          max_budget: 64
           saguaro:
-            budget: 2
-            branch_len: 2
+            budget: 8
+            branch_len: 3
             fan_out: uniform
             exit_mode: trunk
-            trace: true
+            trace: false

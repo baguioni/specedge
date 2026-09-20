@@ -103,28 +103,49 @@ def select_exit_nodes(tree, max_n_beams: int, exit_mode: str) -> torch.Tensor:
     return nodes
 
 
-def existing_child_token(tree, node_idx: int):  # -> int | None
-    """Token already hanging off ``node_idx`` in the submitted tree, if any.
+def existing_child_tokens(tree, node_idx: int) -> list[int]:
+    """Tokens already hanging off ``node_idx`` in the submitted tree.
 
-    That token cannot be the server's bonus token at this exit point (it is
-    already covered by the main tree), so it is excluded from the fan-out --
-    the SpecEdge analogue of Saguaro's ``excluded = spec_tokens[k]``.
+    None of them can be the server's bonus token at this exit point: exiting
+    here means the server rejected this node's drafted children, and the
+    residual it samples the bonus from has their mass removed. They are the
+    SpecEdge analogue of Saguaro's ``excluded = spec_tokens[k]``.
+
+    Every child must be excluded, not just the first. With
+    ``max_branch_width > 1`` a node's children are the top-W of the very
+    distribution the fan-out ranks, so excluding one leaves the fan-out free
+    to "guess" ranks 2..W -- outcomes the main tree already covers and that
+    therefore can never be hit.
     """
     end = int(tree.end)
     child = torch.where(tree.parents[:end] == node_idx)[0]
     child = child[child >= int(tree.prefix_len)]
     if child.numel() == 0:
-        return None
-    return int(tree.tokens[int(child[0])].item())
+        return []
+    return sorted({int(t) for t in tree.tokens[child].tolist()})
+
+
+def _as_skip_set(excluded) -> set[int]:
+    """Normalise one ``excluded`` entry: ``None``, a token id, or an iterable."""
+    if excluded is None:
+        return set()
+    if isinstance(excluded, int):
+        return {excluded}
+    return {int(t) for t in excluded}
 
 
 def outcomes_from_logprobs(
     exit_nodes: list[int],
     logp: torch.Tensor,  # (len(exit_nodes), V)
     fan_out: list[int],  # len(exit_nodes)
-    excluded: list,  # len(exit_nodes), each int | None
+    excluded: list,  # len(exit_nodes), each None | int | iterable of int
 ) -> tuple[list[int], list[int]]:
-    """Pick the top-``F`` draft tokens at each exit node as bonus candidates."""
+    """Pick the top-``F`` draft tokens at each exit node as bonus candidates.
+
+    Tokens in that node's ``excluded`` entry are skipped, and the top-k is
+    widened by as many, so a node with several excluded children still yields
+    its full ``F`` guesses.
+    """
     if logp.shape[0] != len(fan_out):
         raise ValueError(f"logp rows ({logp.shape[0]}) != fan_out ({len(fan_out)})")
     vocab = int(logp.shape[-1])
@@ -134,11 +155,11 @@ def outcomes_from_logprobs(
     for pos, (node_idx, f) in enumerate(zip(exit_nodes, fan_out, strict=True)):
         if f <= 0:
             continue
-        cand = torch.topk(logp[pos], k=min(f + 1, vocab)).indices.tolist()
-        skip = excluded[pos]
+        skip = _as_skip_set(excluded[pos])
+        cand = torch.topk(logp[pos], k=min(f + len(skip), vocab)).indices.tolist()
         taken = 0
         for tok in cand:
-            if tok == skip:
+            if tok in skip:
                 continue
             out_nodes.append(int(node_idx))
             out_bonus.append(int(tok))
@@ -155,7 +176,7 @@ class OutcomePrediction:
     Attributes:
         candidates: candidate exit nodes, in fan-out order.
         fan: guesses budgeted at each candidate (parallel to ``candidates``).
-        excluded: token already hanging off each candidate, or ``None``.
+        excluded: tokens already hanging off each candidate (empty when none).
         exit_nodes: exit node of each predicted outcome.
         bonus_tokens: guessed bonus token of each outcome (parallel to
             ``exit_nodes``).
@@ -222,7 +243,7 @@ def predict_outcome_details(
     logp = torch.log_softmax(logits[0, -exit_idx.numel() :, :], dim=-1)
 
     candidates = exit_idx.tolist()
-    excluded = [existing_child_token(tree, int(n)) for n in candidates]
+    excluded = [existing_child_tokens(tree, int(n)) for n in candidates]
     nodes, bonus = outcomes_from_logprobs(candidates, logp, fan, excluded)
 
     row = {int(n): i for i, n in enumerate(candidates)}

@@ -109,11 +109,13 @@ def token_ids(requests: list[dict]) -> set[int]:
             ids.update(n["token"] for n in step["draft"]["nodes"])
             ids.update(n["token"] for n in step["saguaro"]["forest"])
             ids.update(b["bonus"] for b in step["saguaro"]["bets"])
-            ids.update(
-                c["excluded"]
-                for c in step["saguaro"]["candidates"]
-                if c["excluded"] is not None
-            )
+            for c in step["saguaro"]["candidates"]:
+                # ``excluded`` is a list of token ids; older traces wrote a
+                # single id or null.
+                ex = c["excluded"]
+                if ex is None:
+                    continue
+                ids.update(ex if isinstance(ex, list) else [ex])
             ids.update(step["verify"]["accepted_tokens"])
             ids.add(step["verify"]["bonus"])
     return ids
@@ -534,8 +536,10 @@ function stage2(step) {
     const node = nodes.get(String(c.node));
     if (!node) continue;
     node.badge = c.fan > 0 ? [String(c.fan), ""] : ["", "zero"];
+    const ex = c.excluded === null || c.excluded === undefined ? []
+      : (Array.isArray(c.excluded) ? c.excluded : [c.excluded]);
     node.title += `\ncandidate exit node: ${c.fan} guess${c.fan === 1 ? "" : "es"}` +
-      (c.excluded !== null ? `, skips ${JSON.stringify(show(tok(c.excluded)))} (already a draft child)` : "");
+      (ex.length ? `, skips ${ex.map(t => JSON.stringify(show(tok(t)))).join(", ")} (already draft children)` : "");
   }
   return renderTree(nodes, root, "draft tree with the Saguaro fan-out");
 }

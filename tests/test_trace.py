@@ -252,7 +252,7 @@ def test_predict_outcome_details_matches_predict_outcomes():
     details = predict_outcome_details(tree, engine, **kwargs)
     assert details.candidates == [3, 4]
     assert details.fan == [2, 1]
-    assert details.excluded == [None, None]
+    assert details.excluded == [[], []]  # leaves have no children to exclude
     assert list(zip(details.exit_nodes, details.bonus_tokens, strict=True)) == [
         (3, 7), (3, 8), (4, 9)
     ]

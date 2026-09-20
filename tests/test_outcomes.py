@@ -54,3 +54,18 @@ def test_exclusion_can_free_a_slot_for_next_token():
     logp = _logp([{1: 9.0, 2: 8.0, 3: 7.0}])
     nodes, bonus = outcomes_from_logprobs([5], logp, [2], [1])
     assert list(zip(nodes, bonus, strict=True)) == [(5, 2), (5, 3)]
+
+
+def test_excludes_every_existing_child_not_just_the_first():
+    # With max_branch_width > 1 the node's children are the top-W of this same
+    # distribution, so all of them must be skipped or the fan-out "guesses" a
+    # token the main tree already covers.
+    logp = _logp([{1: 9.0, 2: 8.0, 3: 7.0, 4: 6.0}])
+    nodes, bonus = outcomes_from_logprobs([5], logp, [2], [[1, 2]])
+    assert list(zip(nodes, bonus, strict=True)) == [(5, 3), (5, 4)]
+
+
+def test_empty_exclusion_list_behaves_like_none():
+    logp = _logp([{1: 9.0, 2: 8.0}])
+    assert outcomes_from_logprobs([5], logp, [1], [[]]) == ([5], [1])
+    assert outcomes_from_logprobs([5], logp, [1], [None]) == ([5], [1])

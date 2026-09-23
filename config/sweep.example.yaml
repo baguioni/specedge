@@ -24,8 +24,23 @@
 # is <public_ip> : the host port mapped to the container's SPECEDGE_PORT).
 # Can be overridden on the command line with:  --host <ip_address:host_port>
 # --------------------------------------------------------------------------- #
+# Identity file passed as `ssh -i` to both boxes.
+ssh_identity: ~/.ssh/vast
+
+server:
+  ssh: "root@202.122.49.242 -p 17720"
+  # Container port batch_server.py binds. It is hardcoded to 10100 (SPECEDGE_PORT
+  # is exported but never read), so this is what vast_ports.sh --emit reports.
+  port: 10100
+
 client:
-  host: "127.0.0.1:8080"
+  ssh: "root@175.28.230.22 -p 50117"
+  # <server public ip>:<host port VAST maps to container port 10100>
+  host: "202.122.49.242:17498"
+
+# script/sweep.py waits for this line in the server's stdout/log before it
+# starts the client (logged at the end of SpecExecBatchServer init).
+ready_marker: "Inference controller initialized"
 
 paths:
   # Template on this machine; merged then overridden per experiment.
@@ -38,11 +53,13 @@ paths:
   collect_to: result/sweep
   # Only used for the optional server-side result pull below: the repo checkout
   # path on the server box ("~" is expanded by the remote shell).
-  remote_root: "~/specedge"
+  remote_root: /workspace/specedge
 
 timeouts:
-  run: 5400        # s cap for one client_host.py run
-  cooldown: 10     # s to pause between experiments
+  run: 5400            # s cap for one client_host.py run
+  cooldown: 10         # s to pause between experiments
+  server_ready: 900    # s to wait for ready_marker after launching the server
+  server_shutdown: 120 # s to wait for the server to exit after clients finish
 
 common:
   base:
@@ -61,11 +78,11 @@ common:
     draft_model: Qwen/Qwen3-1.7B
     dataset: specbench
     reasoning: false
-    sample_req_cnt: 8
+    sample_req_cnt: 32
     req_offset: 0
-    max_n_beams: 32
-    max_beam_len: 4
-    max_branch_width: 16
+    max_n_beams: 8
+    max_beam_len: 6
+    max_branch_width: 8
     max_budget: 32
     max_new_tokens: 64
     max_request_num: -1
@@ -91,10 +108,10 @@ experiments:
         proactive:
           type: included
           strategy: proactive
-          max_n_beams: 32
-          max_beam_len: 3
-          max_branch_width: 16
-          max_budget: 64
+          max_n_beams: 8
+          max_beam_len: 6
+          max_branch_width: 8
+          max_budget: 32
 
   - name: saguaro_geom
     overrides:
@@ -102,8 +119,10 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          max_n_beams: 8
+          max_branch_width: 8
+          max_beam_len: 6
+          max_budget: 32
           saguaro:
             budget: 8
             branch_len: 3
@@ -118,8 +137,10 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          max_n_beams: 8
+          max_branch_width: 8
+          max_beam_len: 6
+          max_budget: 32
           saguaro:
             budget: 8
             branch_len: 3
@@ -134,8 +155,10 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          max_n_beams: 8
+          max_branch_width: 8
+          max_beam_len: 6
+          max_budget: 32
           saguaro:
             budget: 8
             branch_len: 3
@@ -149,8 +172,10 @@ experiments:
         proactive:
           type: included
           strategy: saguaro
-          max_beam_len: 3
-          max_budget: 64
+          max_n_beams: 8
+          max_branch_width: 8
+          max_beam_len: 6
+          max_budget: 32
           saguaro:
             budget: 8
             branch_len: 3

@@ -46,9 +46,9 @@ common:
     reasoning: false
     sample_req_cnt: 32
     req_offset: 0
-    max_n_beams: 32
-    max_beam_len: 4
-    max_branch_width: 16
+    max_n_beams: 8
+    max_beam_len: 6
+    max_branch_width: 8
     max_budget: 32
     max_new_tokens: 64
     max_request_num: -1
@@ -73,20 +73,20 @@ experiments:
       proactive:
         type: included
         strategy: proactive
-        max_n_beams: 32
-        max_beam_len: 3
-        max_branch_width: 16
-        max_budget: 64
+        max_n_beams: 8
+        max_beam_len: 6
+        max_branch_width: 8
+        max_budget: 32
 - name: saguaro_geom
   overrides:
     client:
       proactive:
         type: included
         strategy: saguaro
-        max_n_beams: 32
-        max_branch_width: 16
-        max_beam_len: 3
-        max_budget: 64
+        max_n_beams: 8
+        max_branch_width: 8
+        max_beam_len: 6
+        max_budget: 32
         saguaro:
           budget: 8
           branch_len: 3
@@ -100,10 +100,10 @@ experiments:
       proactive:
         type: included
         strategy: saguaro
-        max_n_beams: 32
-        max_branch_width: 16
-        max_beam_len: 3
-        max_budget: 64
+        max_n_beams: 8
+        max_branch_width: 8
+        max_beam_len: 6
+        max_budget: 32
         saguaro:
           budget: 8
           branch_len: 3
@@ -117,10 +117,10 @@ experiments:
       proactive:
         type: included
         strategy: saguaro
-        max_n_beams: 32
-        max_branch_width: 16
-        max_beam_len: 3
-        max_budget: 64
+        max_n_beams: 8
+        max_branch_width: 8
+        max_beam_len: 6
+        max_budget: 32
         saguaro:
           budget: 8
           branch_len: 3
@@ -133,10 +133,10 @@ experiments:
       proactive:
         type: included
         strategy: saguaro
-        max_n_beams: 32
-        max_branch_width: 16
-        max_beam_len: 3
-        max_budget: 64
+        max_n_beams: 8
+        max_branch_width: 8
+        max_beam_len: 6
+        max_budget: 32
         saguaro:
           budget: 8
           branch_len: 3

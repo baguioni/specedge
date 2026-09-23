@@ -44,7 +44,7 @@ common:
     draft_model: Qwen/Qwen3-0.6B
     dataset: specbench
     reasoning: false
-    sample_req_cnt: 32
+    sample_req_cnt: 16
     req_offset: 0
     max_n_beams: 8
     max_beam_len: 6

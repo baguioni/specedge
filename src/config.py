@@ -145,6 +145,16 @@ class SpecEdgeClientConfig(metaclass=_ConfigMeta):
         cls.host = cls._from_env("SPECEDGE_HOST")
         cls.client_idx = int(cls._from_env("SPECEDGE_CLIENT_IDX"))
 
+        # replay configuration: answer verification from a recorded trace.jsonl
+        # instead of the gRPC server. Unset keeps the live server path. The
+        # simulated latencies default to the 2026-09-20 A100 sweep (14B target):
+        # ~42 ms server compute + ~39 ms network per non-prefill verify.
+        replay_trace = os.getenv("SPECEDGE_REPLAY_TRACE", "")
+        cls.replay_trace = None if replay_trace in ("", "null", "None") else replay_trace
+        cls.replay_server_ms = float(os.getenv("SPECEDGE_REPLAY_SERVER_MS", "42"))
+        cls.replay_prefill_ms = float(os.getenv("SPECEDGE_REPLAY_PREFILL_MS", "80"))
+        cls.replay_rtt_ms = float(os.getenv("SPECEDGE_REPLAY_RTT_MS", "39"))
+
         cls._initialized = True
 
 

@@ -1,0 +1,145 @@
+# Server-free replay of config/sweep.example.yaml.
+#
+# Same six experiments, but every verify is answered from a recorded greedy
+# 14B trace (src/specedge/network/oracle.py) instead of a live batch server.
+# Only the edge (draft) GPU is needed. Run on the client box:
+#   python script/sweep_experiments.py -f config/sweep_replay.yaml
+#   python src/metric/specedge.py -d result/sweep_replay/<exp> --gpu A100_80
+#
+# client.host is a placeholder: nothing dials it in replay mode.
+# The 64-token trace stops at 65-69 tokens, and the client can draft up to
+# ~77. Past the recorded end the oracle answers EOS, so the last cycle of most
+# requests is cut short (logged as "draft reached past the recorded completion").
+# replay.server_ms / rtt_ms default to the 2026-09-20 live sweep's means
+# (server_end_to_end_t ~42 ms, client_wait ~81 ms non-prefill).
+
+ssh_identity: ~/.ssh/vast
+client:
+  host: replay:0
+paths:
+  base_config: config/specedge.example.yaml
+  rendered_dir: config/_sweep
+  result_path: result/sweep_replay
+  collect_to: result/sweep_replay
+  remote_root: /workspace/specedge
+timeouts:
+  run: 5400
+  cooldown: 0
+  server_ready: 900
+  server_shutdown: 120
+common:
+  base:
+    max_len: 2048
+    seed: 42
+    dtype: fp16
+  server:
+    target_model: Qwen/Qwen3-14B
+    device: cuda:0
+    temperature: 0.7
+    max_batch_size: 1
+    num_clients: 1
+    batch_type: static
+    cache_prefill: true
+  client:
+    draft_model: Qwen/Qwen3-1.7B
+    dataset: specbench
+    reasoning: false
+    sample_req_cnt: 32
+    req_offset: 0
+    max_n_beams: 32
+    max_beam_len: 4
+    max_branch_width: 16
+    max_budget: 32
+    max_new_tokens: 64
+    max_request_num: -1
+    replay:
+      trace: server-trace/qwen3-14b_64output/trace.jsonl
+      server_ms: 42
+      prefill_ms: 80
+      rtt_ms: 39
+  node:
+    localhost:
+    - device: cuda:0
+experiments:
+- name: baseline
+  overrides:
+    client:
+      proactive:
+        type: excluded
+        strategy: disabled
+- name: proactive
+  overrides:
+    client:
+      proactive:
+        type: included
+        strategy: proactive
+        max_n_beams: 32
+        max_beam_len: 3
+        max_branch_width: 16
+        max_budget: 64
+- name: saguaro_geom
+  overrides:
+    client:
+      proactive:
+        type: included
+        strategy: saguaro
+        max_n_beams: 32
+        max_branch_width: 16
+        max_beam_len: 3
+        max_budget: 64
+        saguaro:
+          budget: 8
+          branch_len: 3
+          fan_out: geometric
+          acceptance_rate: 0.5
+          exit_mode: leaf
+          trace: false
+- name: saguaro_geom_linear
+  overrides:
+    client:
+      proactive:
+        type: included
+        strategy: saguaro
+        max_n_beams: 32
+        max_branch_width: 16
+        max_beam_len: 3
+        max_budget: 64
+        saguaro:
+          budget: 8
+          branch_len: 3
+          fan_out: geometric
+          acceptance_rate: 0.5
+          exit_mode: trunk
+          trace: false
+- name: saguaro_uniform
+  overrides:
+    client:
+      proactive:
+        type: included
+        strategy: saguaro
+        max_n_beams: 32
+        max_branch_width: 16
+        max_beam_len: 3
+        max_budget: 64
+        saguaro:
+          budget: 8
+          branch_len: 3
+          fan_out: uniform
+          exit_mode: leaf
+          trace: false
+- name: saguaro_uniform_linear
+  overrides:
+    client:
+      proactive:
+        type: included
+        strategy: saguaro
+        max_n_beams: 32
+        max_branch_width: 16
+        max_beam_len: 3
+        max_budget: 64
+        saguaro:
+          budget: 8
+          branch_len: 3
+          fan_out: uniform
+          exit_mode: trunk
+          trace: false

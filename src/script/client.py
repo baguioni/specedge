@@ -9,6 +9,7 @@ import util
 from config import SpecEdgeClientConfig as config
 from specedge.client.specexec import SpecExecClient
 from specedge.engine.graph import GraphEngine
+from specedge.network.oracle import OracleValidator
 from specedge_grpc import specedge_pb2, specedge_pb2_grpc
 
 
@@ -59,17 +60,44 @@ async def main():
     random.seed(config.client_idx)
     random.shuffle(req_indices)
 
-    with grpc.insecure_channel(config.host) as channel:
-        stub = specedge_pb2_grpc.SpecEdgeServiceStub(channel)
-        # exp_name / result_path travel with the sync so a persistent server can
-        # re-point its result logger at this run's folder without a restart.
-        _ = stub.Sync(
-            specedge_pb2.SyncRequest(
-                client_idx=config.client_idx,
-                exp_name=config.exp_name,
-                result_path=config.result_path,
-            )
+    # Replay mode: no server. Verification is answered from a recorded trace.
+    validator = None
+    if config.replay_trace is not None:
+        logger.info(
+            "Replaying verifier trace %s (server %.1f ms, prefill %.1f ms, rtt %.1f ms)",
+            config.replay_trace,
+            config.replay_server_ms,
+            config.replay_prefill_ms,
+            config.replay_rtt_ms,
         )
+        validator = OracleValidator(
+            trace_path=config.replay_trace,
+            device=config.device,
+            eos_token_id=tokenizer.eos_token_id,
+            server_ms=config.replay_server_ms,
+            prefill_ms=config.replay_prefill_ms,
+            rtt_ms=config.replay_rtt_ms,
+            server_log_path=Path(config.result_path) / config.exp_name / "server.jsonl",
+        )
+        missing = [i for i in req_indices if not validator.has(i)]
+        if missing:
+            logger.warning(
+                "Skipping %d requests not in the trace: %s", len(missing), missing
+            )
+            req_indices = [i for i in req_indices if validator.has(i)]
+    else:
+        with grpc.insecure_channel(config.host) as channel:
+            stub = specedge_pb2_grpc.SpecEdgeServiceStub(channel)
+            # exp_name / result_path travel with the sync so a persistent server
+            # can re-point its result logger at this run's folder without a
+            # restart.
+            _ = stub.Sync(
+                specedge_pb2.SyncRequest(
+                    client_idx=config.client_idx,
+                    exp_name=config.exp_name,
+                    result_path=config.result_path,
+                )
+            )
 
     logger.info("Starting %s requests", config.max_request_num)
     for i, req_idx in enumerate(req_indices):
@@ -79,7 +107,11 @@ async def main():
             prompt=dataset[req_idx],
             engine=engine,
             tokenizer=tokenizer,
+            validator=validator,
         )
+
+    if validator is not None:
+        return
 
     # Tell the server this client is done with the current experiment. Once
     # every client has checked in the server re-arms for the next run's Sync;
@@ -93,12 +125,13 @@ async def main():
         logger.warning("Done notification failed: %s", e)
 
 
-async def generate(engine, tokenizer, req_idx: int, prompt: str):
+async def generate(engine, tokenizer, req_idx: int, prompt: str, validator=None):
     client = SpecExecClient(
         engine=engine,
         tokenizer=tokenizer,
         prompt=prompt,
         max_len=config.max_len,
+        validator=validator,
     )
 
     await client.generate(req_idx)

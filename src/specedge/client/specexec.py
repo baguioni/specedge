@@ -20,6 +20,7 @@ class SpecExecClient:
         tokenizer,
         prompt: str,
         max_len: int,
+        validator=None,
     ) -> None:
         # logging
         self._logger = log.get_logger()
@@ -65,7 +66,9 @@ class SpecExecClient:
             dtype=self._dtype,
             max_len=self._engine.max_len,
         )
-        self._validator = GrpcClientController(host=config.host, device=self._device)
+        self._validator = validator or GrpcClientController(
+            host=config.host, device=self._device
+        )
 
         # Overlap strategy: extra edge drafting during server verification.
         # "disabled" -> None; "proactive" / "saguaro" -> an OverlapStrategy.
@@ -128,6 +131,9 @@ class SpecExecClient:
 
         util.set_seed(config.seed)
         step_idx = 0
+
+        if hasattr(self._validator, "check_prompt"):
+            self._validator.check_prompt(req_idx, self._prefix_tokens)
 
         if self._tracer is not None:
             self._tracer.begin_request(req_idx)

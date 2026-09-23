@@ -85,6 +85,15 @@ def main(config_file: str):
     logger.debug("saguaro_budget: %s", saguaro_budget)
     logger.debug("saguaro_branch_len: %s", saguaro_branch_len)
 
+    # replay configuration: verify against a recorded trace instead of a server
+    replay_cfg = config["client"].get("replay", {}) or {}
+    replay_trace = replay_cfg.get("trace", "")
+    replay_server_ms = replay_cfg.get("server_ms", 42)
+    replay_prefill_ms = replay_cfg.get("prefill_ms", 80)
+    replay_rtt_ms = replay_cfg.get("rtt_ms", 39)
+
+    logger.debug("replay_trace: %s", replay_trace)
+
     # experiment configuration
     max_new_tokens = config["client"]["max_new_tokens"]
     max_request_num = config["client"]["max_request_num"]
@@ -135,6 +144,10 @@ def main(config_file: str):
                 "SPECEDGE_HOST": host,
                 "SPECEDGE_CLIENT_IDX": client_idx,
                 "SPECEDGE_REASONING": reasoning,
+                "SPECEDGE_REPLAY_TRACE": replay_trace,
+                "SPECEDGE_REPLAY_SERVER_MS": replay_server_ms,
+                "SPECEDGE_REPLAY_PREFILL_MS": replay_prefill_ms,
+                "SPECEDGE_REPLAY_RTT_MS": replay_rtt_ms,
             }
 
             cmd = f"cd {SPECEDGE_ROOT} && "

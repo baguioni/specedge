@@ -113,7 +113,7 @@ experiments:
           max_branch_width: 8
           max_budget: 32
 
-  - name: saguaro_geom
+  - name: saguaro_geom_leaf
     overrides:
       client:
         proactive:
@@ -131,7 +131,7 @@ experiments:
             exit_mode: leaf
             trace: false
 
-  - name: saguaro_geom_linear
+  - name: saguaro_geom_trunk
     overrides:
       client:
         proactive:
@@ -149,7 +149,7 @@ experiments:
             exit_mode: trunk
             trace: false
 
-  - name: saguaro_uniform
+  - name: saguaro_uniform_leaf
     overrides:
       client:
         proactive:
@@ -166,7 +166,7 @@ experiments:
             exit_mode: leaf
             trace: false
 
-  - name: saguaro_uniform_linear
+  - name: saguaro_uniform_trunk
     overrides:
       client:
         proactive:

@@ -69,3 +69,44 @@ def test_empty_exclusion_list_behaves_like_none():
     logp = _logp([{1: 9.0, 2: 8.0}])
     assert outcomes_from_logprobs([5], logp, [1], [[]]) == ([5], [1])
     assert outcomes_from_logprobs([5], logp, [1], [None]) == ([5], [1])
+
+
+def _wide_tree():
+    """Prompt [1, 2, 3] plus a 2-wide, 3-deep draft tree (9 nodes > 4 beams)."""
+    from specedge.tree import Tree
+
+    tree = Tree(
+        prefix_tokens=torch.tensor([[1, 2, 3]]),
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+        max_len=32,
+    )
+    parent = torch.tensor([2, 2])
+    lp = torch.tensor([-0.1, -2.0])
+    for depth in range(3):
+        tree.add(
+            token_ids=torch.tensor([10 + depth, 20 + depth]),
+            token_positions=torch.full((2,), 3 + depth),
+            parent_indices=parent,
+            logprobs=lp,
+            token_status=tree.CANDIDATE,
+        )
+        parent = torch.tensor([tree.end - 2, tree.end - 1])
+        lp = lp - 1.0
+    return tree
+
+
+def test_trunk_exit_nodes_ordered_by_depth_after_topk():
+    from specedge.client.saguaro.outcomes import select_exit_nodes
+
+    tree = _wide_tree()
+    nodes = select_exit_nodes(tree, max_n_beams=4, exit_mode="trunk")
+
+    # Top 4 by log-prob: last prompt token (0.0), depth-1 best (-0.1),
+    # depth-2 best (-1.1), depth-1 second (-2.0). Log-prob order would be
+    # [2, 3, 5, 4]; the fan-out needs accept-depth order.
+    assert nodes.tolist() == [2, 3, 4, 5]
+    depths = tree.positions[nodes].tolist()
+    assert depths == sorted(depths)
+    # Siblings at one depth: higher log-prob first.
+    assert tree.logprobs[3] > tree.logprobs[4]

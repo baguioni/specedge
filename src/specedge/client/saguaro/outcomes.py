@@ -100,6 +100,12 @@ def select_exit_nodes(tree, max_n_beams: int, exit_mode: str) -> torch.Tensor:
     if nodes.numel() > max_n_beams:
         top = torch.topk(tree.logprobs[nodes], k=int(max_n_beams), sorted=False).indices
         nodes = nodes[top]
+        if exit_mode == "trunk":
+            # topk(sorted=False) returns an arbitrary order, but the trunk
+            # fan-out is indexed by accept depth. Restore that order: shallowest
+            # first, ties (siblings at one depth) by cumulative log-prob.
+            nodes = nodes[torch.argsort(tree.logprobs[nodes], descending=True)]
+            nodes = nodes[torch.argsort(tree.positions[nodes], stable=True)]
     return nodes
 
 

@@ -123,8 +123,28 @@ def test_splice_scratch_branch_reuses_winning_branch():
     assert tree.tokens[9:].sum().item() == 0
     assert not torch.any(tree.status == tree.POST_CANDIDATE)
 
-    # KV cache compacted to the accepted prefix
-    assert engine.calls == [([0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5])]
+    # KV cache follows every kept node: the verified path, then the branch
+    # (scratch slots 7, 8, 9 move to 6, 7, 8). gather() zeroes past the last
+    # destination, so leaving the branch out would wipe its KV.
+    assert engine.calls == [
+        ([0, 1, 2, 3, 4, 5, 7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8])
+    ]
+
+
+def test_splice_moves_kv_of_non_contiguous_accepted_path():
+    # Accepted draft nodes sit at scattered tree slots (4, then 6): their KV
+    # must land on the compacted slots 4, 5, followed by the branch.
+    tree = _fresh_tree()
+    engine = _FakeEngine()
+
+    seq_mask = torch.zeros(tree.end, dtype=torch.bool)
+    seq_mask[[0, 1, 2, 3, 4, 6]] = True
+
+    splice_scratch_branch(
+        tree, engine, CPU, F32, seq_mask, branch_src=torch.tensor([7, 8])
+    )
+
+    assert engine.calls == [([0, 1, 2, 3, 4, 6, 7, 8], [0, 1, 2, 3, 4, 5, 6, 7])]
 
 
 def test_reopen_leaves_gives_a_frontierless_branch_a_frontier():

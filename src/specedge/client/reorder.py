@@ -141,5 +141,9 @@ def splice_scratch_branch(
     tree.amask[..., : tree.prefix_len, : tree.prefix_len] = causal
     tree.amask[..., tree.prefix_len : tree.end, : tree.prefix_len] = 1.0
 
-    src = torch.where(seq_mask[: tree.prefix_len])[0]
+    # Move the KV of every kept node to its new slot: the verified path to
+    # [0, new_prefix_len) and the branch to [new_prefix_len, end). gather()
+    # zeroes everything past the last destination, so a node left out here
+    # silently loses its KV.
+    src = torch.cat([seq_indices, branch_src])
     engine.gather(src, torch.arange(src.size(-1), device=device))

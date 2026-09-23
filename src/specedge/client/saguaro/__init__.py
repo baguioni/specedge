@@ -18,6 +18,7 @@ from specedge.client.saguaro.cache import (
 )
 from specedge.client.saguaro.outcomes import (
     geometric_fan_out,
+    geometric_reverse_fan_out,
     predict_outcomes,
     uniform_fan_out,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "Outcome",
     "SpeculationCache",
     "geometric_fan_out",
+    "geometric_reverse_fan_out",
     "predict_outcomes",
     "uniform_fan_out",
 ]

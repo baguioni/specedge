@@ -2,7 +2,11 @@
 
 import pytest
 
-from specedge.client.saguaro.outcomes import geometric_fan_out, uniform_fan_out
+from specedge.client.saguaro.outcomes import (
+    geometric_fan_out,
+    geometric_reverse_fan_out,
+    uniform_fan_out,
+)
 
 
 @pytest.mark.parametrize("K", [0, 1, 3, 7])
@@ -39,3 +43,18 @@ def test_geometric_degenerate_rates():
 def test_single_candidate_gets_all():
     assert geometric_fan_out(0, 9, acceptance_rate=0.5) == [9]
     assert uniform_fan_out(0, 9) == [9]
+
+
+@pytest.mark.parametrize("K", [0, 1, 3, 7])
+@pytest.mark.parametrize("B", [1, 5, 12, 32])
+@pytest.mark.parametrize("a_p", [0.5, 0.9])
+def test_geometric_reverse_mirrors_geometric(K, B, a_p):
+    fan = geometric_reverse_fan_out(K, B, acceptance_rate=a_p)
+    assert fan == geometric_fan_out(K, B, acceptance_rate=a_p)[::-1]
+    assert sum(fan) == B
+
+
+def test_geometric_reverse_puts_most_budget_at_the_back():
+    assert geometric_reverse_fan_out(7, 8, acceptance_rate=0.5) == [
+        0, 0, 0, 1, 1, 1, 2, 3,
+    ]

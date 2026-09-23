@@ -74,6 +74,16 @@ def geometric_fan_out(
     return [max(0, f) for f in fan]
 
 
+def geometric_reverse_fan_out(
+    K: int, B: int, acceptance_rate: float, r: float = 1.0
+) -> list[int]:
+    """:func:`geometric_fan_out` back to front: the deepest positions get the
+    largest share. Not from the paper; an experiment in betting on long accepts
+    rather than early exits.
+    """
+    return geometric_fan_out(K, B, acceptance_rate, r)[::-1]
+
+
 def select_exit_nodes(tree, max_n_beams: int, exit_mode: str) -> torch.Tensor:
     """Candidate exit points where the verified path may leave the draft tree."""
     device = tree.tokens.device
@@ -236,8 +246,15 @@ def predict_outcome_details(
     budget = min(int(budget), int(max_n_beams))
     if fan_out == "uniform":
         fan = uniform_fan_out(K, budget)
-    else:
+    elif fan_out == "geometric":
         fan = geometric_fan_out(K, budget, float(acceptance_rate))
+    elif fan_out == "geometric_reverse":
+        fan = geometric_reverse_fan_out(K, budget, float(acceptance_rate))
+    else:
+        raise ValueError(
+            "saguaro fan_out must be 'uniform', 'geometric' or "
+            f"'geometric_reverse', got {fan_out!r}"
+        )
 
     logits = engine.forward(
         input_ids=tree.tokens[exit_idx].unsqueeze(0),

@@ -44,6 +44,11 @@ def load_model(name: str, device: torch.device, dtype: torch.dtype):
 
 
 def load_graph_model(name: str, device: torch.device, dtype: torch.dtype):
+    if "fp8" in name.lower():
+        from model.fp8 import patch_hf_fp8_linear
+
+        patch_hf_fp8_linear()
+
     if "llama" in name.lower() or "vicuna" in name.lower():
         model = LlamaForCausalLM.from_pretrained(
             name, torch_dtype=dtype, device_map=device

@@ -3,13 +3,13 @@ opt: 2
 base:
   result_path: "result/demo"
   exp_name: "specedge"
-  dtype: bf16
+  dtype: fp16
   seed: 42
   ssh_key: ~/.ssh/id_ed25519_server
   max_len: 2048
 server:
   process_name: server
-  target_model: Qwen/Qwen3.5-27B
+  target_model: Qwen/Qwen3-14B
   device: cuda:0
   temperature: 0.7
   max_batch_size: 1
@@ -17,17 +17,17 @@ server:
   batch_type: static
   cache_prefill: true
 client:
-  host: 127.0.0.1:8000
+  host: 172.16.61.114:10100
   process_name: client
   draft_model: Qwen/Qwen3-1.7B
   dataset: specbench
   reasoning: False
-  sample_req_cnt: 8
+  sample_req_cnt: 32
   req_offset: 0
-  max_n_beams: 32
-  max_beam_len: 4
-  max_branch_width: 16
-  max_budget: 64
+  max_n_beams: 8
+  max_beam_len: 5
+  max_branch_width: 8
+  max_budget: 32
   proactive:
     type: excluded
     strategy: proactive          # proactive | saguaro | disabled
@@ -38,7 +38,7 @@ client:
     saguaro:                     # only used when strategy == saguaro
       budget: 2                 # B: total bonus-token guesses across exit leaves
       branch_len: 2              # continuation depth per predicted outcome
-      fan_out: uniform # geometric | uniform
+      fan_out: uniform # geometric | geometric_reverse | uniform
       acceptance_rate: 0.5       # assumed draft acceptance rate a_p for the geometric fan-out (fixed, not adapted)
       exit_mode: auto             # auto (from max_branch_width) | "leaf" | "trunk"
       trace: true                # write <process_name>.tree_trace.jsonl: draft tree, fan-out and verified path per step

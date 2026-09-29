@@ -22,7 +22,7 @@ client:
   draft_model: Qwen/Qwen3-1.7B
   dataset: specbench
   reasoning: False
-  sample_req_cnt: 32
+  sample_req_cnt: 8
   req_offset: 0
   max_n_beams: 8
   max_beam_len: 5
